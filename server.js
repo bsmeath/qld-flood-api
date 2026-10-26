@@ -7,108 +7,357 @@ const app = express();
 
 app.use(cors());
 
-let gaugeCache = [];
+const PORT = process.env.PORT || 3001;
 
-function getFloodStatus(level, gauge) {
-  if (level >= gauge.major) return "Major";
-  if (level >= gauge.moderate) return "Moderate";
-  if (level >= gauge.minor) return "Minor";
+let gaugeCache = [];
+let lastRefresh = null;
+let discoveredStations = [];
+
+const DISCOVERY_PAGES = [
+  "https://www.bom.gov.au/qld/flood/",
+  "https://www.bom.gov.au/qld/flood/rain_river.shtml"
+];
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function determineStatus(level) {
+  if (level >= 9) return "Major";
+  if (level >= 8) return "Moderate";
+  if (level >= 5) return "Minor";
   return "Normal";
 }
 
-async function discoverGauges() {
-  return [
-    {
-      id: "041499",
-      name: "Condamine River at Tummaville",
-      catchment: "Condamine-Balonne",
-      url: "https://www.bom.gov.au/fwo/IDQ65396/IDQ65396.041499.plt.shtml",
-      lat: -27.9,
-      lon: 151.4,
-      minor: 5,
-      moderate: 8,
-      major: 9
-    }
-  ];
-}
+async function discoverCatchmentPages() {
+  const pages = new Map();
 
-async function discoverGauges() {
-  const discovered = new Map();
-
-  const seedPages = [
-    "https://www.bom.gov.au/qld/flood/",
-    "https://www.bom.gov.au/fwo/"
-  ];
-
-  for (const page of seedPages) {
+  for (const url of DISCOVERY_PAGES) {
     try {
-      const response = await axios.get(page, {
-        timeout: 30000
+      const response = await axios.get(url, {
+        timeout: 30000,
+        headers: {
+          "User-Agent": "QLD-Flood-Collector"
+        }
       });
 
       const $ = cheerio.load(response.data);
 
       $("a").each((_, el) => {
-        const href = $(el).attr("href") || "";
+        const href = $(el).attr("href");
 
-        const match = href.match(
-          /([A-Z]{3}\d+)\.(\d{6})\.plt\.shtml/i
-        );
+        if (!href) return;
 
-        if (!match) return;
+        const absolute =
+          new URL(href, url).toString();
 
-        const stationId = match[2];
-
-        if (!discovered.has(stationId)) {
-          discovered.set(stationId, {
-            id: stationId,
-            url: new URL(href, page).href
-          });
+        if (
+          absolute.includes("/qld/flood/") &&
+          absolute.endsWith(".shtml")
+        ) {
+          pages.set(
+            absolute,
+            absolute
+          );
         }
       });
     } catch (err) {
       console.error(
-        "Discovery error:",
+        "Catchment discovery failed:",
+        url,
         err.message
       );
     }
   }
 
-  return [...discovered.values()];
+  return [...pages.values()];
 }
-async function enrichGauge(gauge) {
+
+async function discoverStationsFromPage(pageUrl) {
+  const stations = [];
+
   try {
-    const response = await axios.get(gauge.url);
+    const response = await axios.get(pageUrl, {
+      timeout: 30000
+    });
 
     const $ = cheerio.load(response.data);
 
-    const heading =
-      $("h1").first().text().trim() ||
-      $("title").text().trim();
+    $("a").each((_, el) => {
+      const href = $(el).attr("href") || "";
 
-    gauge.name = heading;
+      const gaugeMatch =
+        href.match(
+          /\.([0-9]{6})\.plt\.shtml/i
+        );
 
-    const pageText = $("body").text();
+      if (!gaugeMatch) return;
 
-    const latMatch =
-      pageText.match(/Latitude[^-0-9]*(-?\d+\.\d+)/i);
+      const stationId = gaugeMatch[1];
 
-    const lonMatch =
-      pageText.match(/Longitude[^0-9]*(\d+\.\d+)/i);
+      const stationUrl =
+        new URL(
+          href,
+          pageUrl
+        ).toString();
 
-    if (latMatch && lonMatch) {
-      gauge.lat = parseFloat(latMatch[1]);
-      gauge.lon = parseFloat(lonMatch[1]);
-    }
-
-    return gauge;
+      stations.push({
+        id: stationId,
+        url: stationUrl,
+        name:
+          $(el).text().trim() ||
+          stationId
+      });
+    });
   } catch (err) {
     console.error(
-      "Metadata error:",
-      gauge.id,
+      "Station discovery failed:",
+      pageUrl,
+      err.message
+    );
+  }
+
+  return stations;
+}
+
+async function discoverAllStations() {
+  console.log("Discovering stations...");
+
+  const catchmentPages =
+    await discoverCatchmentPages();
+
+  const results =
+    await Promise.all(
+      catchmentPages.map(
+        discoverStationsFromPage
+      )
+    );
+
+  const stations =
+    results.flat();
+
+  const unique =
+    new Map();
+
+  for (const station of stations) {
+    unique.set(
+      station.id,
+      station
+    );
+  }
+
+  console.log(
+    `Discovered ${unique.size} stations`
+  );
+
+  return [...unique.values()];
+}
+
+async function scrapeGauge(station) {
+  try {
+    const response =
+      await axios.get(
+        station.url,
+        {
+          timeout: 30000,
+          headers: {
+            "User-Agent":
+              "QLD-Flood-Collector"
+          }
+        }
+      );
+
+    const $ = cheerio.load(
+      response.data
+    );
+
+    const pageTitle =
+      $("h1")
+        .first()
+        .text()
+        .trim() ||
+      $("title")
+        .text()
+        .trim();
+
+    const observations =
+      [];
+
+    $("tr").each(
+      (_, row) => {
+        const cols =
+          $(row).find("td");
+
+        if (
+          cols.length < 2
+        )
+          return;
+
+        const timestamp =
+          cols
+            .eq(0)
+            .text()
+            .trim();
+
+        const level =
+          parseFloat(
+            cols
+              .eq(1)
+              .text()
+              .trim()
+          );
+
+        if (
+          !isNaN(level)
+        ) {
+          observations.push({
+            timestamp,
+            level
+          });
+        }
+      }
+    );
+
+    const latest =
+      observations[
+        observations.length -
+          1
+      ];
+
+    if (!latest)
+      return null;
+
+    return {
+      id: station.id,
+      name:
+        pageTitle ||
+        station.name,
+      level:
+        latest.level,
+      observed:
+        latest.timestamp,
+      status:
+        determineStatus(
+          latest.level
+        ),
+      lat: null,
+      lon: null,
+      history:
+        observations.slice(
+          -100
+        )
+    };
+  } catch (err) {
+    console.error(
+      `Failed ${station.id}:`,
       err.message
     );
 
-    return gauge;
+    return null;
   }
 }
+
+async function refreshGauges() {
+  console.log(
+    "Refreshing gauges..."
+  );
+
+  if (
+    discoveredStations.length ===
+    0
+  ) {
+    discoveredStations =
+      await discoverAllStations();
+  }
+
+  const results =
+    await Promise.allSettled(
+      discoveredStations.map(
+        scrapeGauge
+      )
+    );
+
+  gaugeCache =
+    results
+      .filter(
+        r =>
+          r.status ===
+            "fulfilled" &&
+          r.value
+      )
+      .map(
+        r => r.value
+      );
+
+  lastRefresh =
+    new Date()
+      .toISOString();
+
+  console.log(
+    `Loaded ${gaugeCache.length} gauges`
+  );
+}
+
+app.get(
+  "/api/status",
+  (req, res) => {
+    res.json({
+      status:
+        "online",
+      gauges:
+        gaugeCache.length,
+      discovered:
+        discoveredStations.length,
+      updated:
+        lastRefresh
+    });
+  }
+);
+
+app.get(
+  "/api/gauges",
+  (req, res) => {
+    res.json(
+      gaugeCache
+    );
+  }
+);
+
+app.get(
+  "/api/gauges/:id",
+  (req, res) => {
+    const gauge =
+      gaugeCache.find(
+        g =>
+          g.id ===
+          req.params.id
+      );
+
+    if (!gauge) {
+      return res
+        .status(404)
+        .json({
+          error:
+            "Gauge not found"
+        });
+    }
+
+    res.json(gauge);
+  }
+);
+
+app.listen(
+  PORT,
+  async () => {
+    console.log(
+      `Listening on ${PORT}`
+    );
+
+    await refreshGauges();
+
+    setInterval(
+      refreshGauges,
+      5 * 60 * 1000
+    );
+  }
+);
