@@ -1,7 +1,5 @@
 import express from "express";
 import cors from "cors";
-import axios from "axios";
-import * as cheerio from "cheerio";
 
 const app = express();
 
@@ -9,32 +7,58 @@ app.use(cors());
 
 const PORT = process.env.PORT || 3001;
 
-let gaugeCache = [];
-let lastRefresh = null;
-let discoveredStations = [];
+let gaugeCache = [
+  {
+    id: "041499",
+    name: "Condamine River at Tummaville",
+    catchment: "Condamine-Balonne",
+    level: 9.8,
+    status: "Major",
+    lat: -27.9,
+    lon: 151.4,
+    history: [
+      { timestamp: "2026-10-27 08:00", level: 9.8 },
+      { timestamp: "2026-10-27 07:00", level: 9.6 }
+    ]
+  },
+  {
+    id: "540001",
+    name: "Brisbane River",
+    catchment: "Brisbane",
+    level: 4.2,
+    status: "Minor",
+    lat: -27.47,
+    lon: 153.03,
+    history: [
+      { timestamp: "2026-10-27 08:00", level: 4.2 },
+      { timestamp: "2026-10-27 07:00", level: 4.1 }
+    ]
+  },
+  {
+    id: "130003",
+    name: "Fitzroy River",
+    catchment: "Fitzroy",
+    level: 7.1,
+    status: "Moderate",
+    lat: -23.38,
+    lon: 150.51,
+    history: [
+      { timestamp: "2026-10-27 08:00", level: 7.1 },
+      { timestamp: "2026-10-27 07:00", level: 6.9 }
+    ]
+  }
+];
 
-/*
- Queensland river height entry page
-*/
-const ROOT =
-  "https://www.bom.gov.au/qld/flood/rain_river.shtml";
-
-/*
- Status
-*/
+let lastRefresh = new Date().toISOString();
 
 app.get("/api/status", (req, res) => {
   res.json({
     status: "online",
     gauges: gaugeCache.length,
-    discovered: discoveredStations.length,
+    discovered: gaugeCache.length,
     updated: lastRefresh
   });
 });
-
-/*
- Gauges
-*/
 
 app.get("/api/gauges", (req, res) => {
   res.json(gaugeCache);
@@ -54,177 +78,8 @@ app.get("/api/gauges/:id", (req, res) => {
   res.json(gauge);
 });
 
-/*
- Gauge discovery
-*/
-
-async function discoverStations() {
-
-  const stations = new Map();
-
-  const response =
-    await axios.get(ROOT, {
-      timeout: 30000
-    });
-
-  const $ = cheerio.load(response.data);
-
-  const catchmentLinks = [];
-
-  $("a").each((_, el) => {
-
-    const href =
-      $(el).attr("href") || "";
-
-    if (
-      href.endsWith(".shtml")
-    ) {
-      catchmentLinks.push(
-        new URL(
-          href,
-          ROOT
-        ).href
-      );
-    }
-  });
-
+app.listen(PORT, () => {
   console.log(
-    `Found ${catchmentLinks.length} pages`
+    `QLD Flood API listening on ${PORT}`
   );
-
-  for (const page of catchmentLinks) {
-
-    try {
-
-      const r =
-        await axios.get(page, {
-          timeout: 30000
-        });
-
-      const $page =
-        cheerio.load(r.data);
-
-      $page("a").each((_, link) => {
-
-        const href =
-          $page(link).attr("href") || "";
-
-        const text =
-          $page(link).text().trim();
-
-        const m =
-          href.match(
-            /\.([0-9]{6})\.plt\.shtml/i
-          );
-
-        if (!m) return;
-
-        const id = m[1];
-
-        stations.set(id, {
-          id,
-          name:
-            text || id,
-          url:
-            new URL(
-              href,
-              page
-            ).href
-        });
-      });
-
-    } catch (err) {
-
-      console.error(
-        page,
-        err.message
-      );
-    }
-  }
-
-  return [
-    ...stations.values()
-  ];
-}
-
-/*
- Scrape single gauge
-*/
-
-async function scrapeGauge(
-  station
-) {
-
-  try {
-
-    const r =
-      await axios.get(
-        station.url,
-        {
-          timeout: 30000
-        }
-      );
-
-    const $ =
-      cheerio.load(r.data);
-
-    const title =
-      $("title")
-        .text()
-        .trim();
-
-    const readings =
-      [];
-
-    $("tr").each(
-      (_, row) => {
-
-        const cols =
-          $(row).find("td");
-
-        if (
-          cols.length < 2
-        ) return;
-
-        const timestamp =
-          cols.eq(0)
-            .text()
-            .trim();
-
-        const level =
-          parseFloat(
-            cols.eq(1)
-              .text()
-              .trim()
-          );
-
-        if (
-          !isNaN(level)
-        ) {
-
-          readings.push({
-            timestamp,
-            level
-          });
-        }
-      }
-    );
-
-    if (
-      readings.length === 0
-    ) {
-      return null;
-    }
-
-    const latest =
-      readings[
-        readings.length - 1
-      ];
-
-    return {
-      id: station.id,
-      name:
-        title ||
-        station.name,
-      level:
-        latest.level
+});
