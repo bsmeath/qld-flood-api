@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+<title>Queensland Flood Intelligence</title>
+
+<script src="https://cdn.tailwindcss.com"></script>
+
+<style>
+body{
+    background:#020617;
+}
+
+.scrollbar::-webkit-scrollbar{
+    width:8px;
+}
+
+.scrollbar::-webkit-scrollbar-thumb{
+    background:#334155;
+    border-radius:10px;
+}
+</style>
+</head>
+
+<body>
+
+<div id="app" class="p-6 text-slate-100">
+
+    <div class="mb-8">
+
+        <h1 class="text-4xl font-bold">
+            Queensland Flood Intelligence
+        </h1>
+
+        <p class="text-slate-400 mt-2">
+            Live Moderate & Major Flood Monitoring
+        </p>
+
+    </div>
+
+    <div class="grid md:grid-cols-4 gap-4 mb-6">
+
+        <div class="bg-slate-900 border border-slate-800 rounded-3xl p-4">
+            <div class="text-slate-400">Major Flood</div>
+            <div id="majorCount" class="text-3xl font-bold text-red-500">0</div>
+        </div>
+
+        <div class="bg-slate-900 border border-slate-800 rounded-3xl p-4">
+            <div class="text-slate-400">Moderate Flood</div>
+            <div id="moderateCount" class="text-3xl font-bold text-orange-400">0</div>
+        </div>
+
+        <div class="bg-slate-900 border border-slate-800 rounded-3xl p-4">
+            <div class="text-slate-400">Flooded Stations</div>
+            <div id="stationCount" class="text-3xl font-bold text-cyan-400">0</div>
+        </div>
+
+        <div class="bg-slate-900 border border-slate-800 rounded-3xl p-4">
+            <div class="text-slate-400">Status</div>
+            <div id="status" class="text-xl font-bold text-green-400">
+                Loading
+            </div>
+        </div>
+
+    </div>
+
+    <div class="bg-slate-900 border border-slate-800 rounded-3xl p-4 mb-6">
+
+        <input
+            id="search"
+            class="w-full rounded-xl bg-slate-800 border border-slate-700 p-3"
+            placeholder="Search flooded stations..."
+        />
+
+    </div>
+
+    <div class="grid lg:grid-cols-3 gap-6">
+
+        <div class="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-3xl p-4">
+
+            <h2 class="text-xl font-semibold mb-4">
+                Queensland Flood Map
+            </h2>
+
+            <div class="relative h-[700px] rounded-2xl overflow-hidden bg-slate-800">
+
+                <svg
+                    viewBox="0 0 1000 900"
+                    class="absolute inset-0 w-full h-full"
+                >
+                    <path
+                        d="M180 80 L760 80 L860 220 L860 760 L500 820 L250 760 L170 620 L140 180 Z"
+                        fill="#1e293b"
+                        stroke="#475569"
+                        stroke-width="4"
+                    />
+                </svg>
+
+                <div id="mapMarkers"></div>
+
+            </div>
+
+        </div>
+
+        <div class="bg-slate-900 border border-slate-800 rounded-3xl p-4">
+
+            <h2 class="text-xl font-semibold mb-4">
+                Flood Details
+            </h2>
+
+            <div id="details">
+                Select a flood station
+            </div>
+
+        </div>
+
+    </div>
+
+    <div class="bg-slate-900 border border-slate-800 rounded-3xl p-4 mt-6">
+
+        <h2 class="text-xl font-semibold mb-4">
+            Active Flood Stations
+        </h2>
+
+        <div
+            id="stationList"
+            class="space-y-2 max-h-[700px] overflow-auto scrollbar"
+        ></div>
+
+    </div>
+
+</div>
+
+<script>
+
+const API =
+"https://qld-flood-api.onrender.com/api/flooded";
+
+let allStations = [];
+
+async function loadData() {
+
+    try {
+
+        const response =
+            await fetch(API);
+
+        const data =
+            await response.json();
+
+        allStations = data;
+
+        document.getElementById(
+            "status"
+        ).textContent = "Live";
+
+        render();
+
+    } catch (error) {
+
+        console.error(error);
+
+        document.getElementById(
+            "status"
+        ).textContent = "Offline";
+
+    }
+
+}
+
+function render() {
+
+    const search =
+        document
+        .getElementById("search")
+        .value.toLowerCase();
+
+    const stations =
+        allStations.filter(
+            s =>
+                (s.name || "")
+                .toLowerCase()
+                .includes(search) ||
+
+                (s.stream || "")
+                .toLowerCase()
+                .includes(search) ||
+
+                (s.basin || "")
+                .toLowerCase()
+                .includes(search) ||
+
+                (s.id || "")
+                .toLowerCase()
+                .includes(search)
+        );
+
+    const major =
+        stations.filter(
+            s => s.status === "Major"
+        ).length;
+
+    const moderate =
+        stations.filter(
+            s => s.status === "Moderate"
+        ).length;
+
+    document.getElementById(
+        "majorCount"
+    ).textContent = major;
+
+    document.getElementById(
+        "moderateCount"
+    ).textContent = moderate;
+
+    document.getElementById(
+        "stationCount"
+    ).textContent = stations.length;
+
+    renderMarkers(stations);
+    renderList(stations);
+
+}
+
+function renderMarkers(stations){
+
+    const container =
+        document.getElementById(
+            "mapMarkers"
+        );
+
+    container.innerHTML = "";
+
+    stations.forEach(station=>{
+
+        const left =
+            ((station.lon - 138) / 16)*100;
+
+        const top =
+            ((-station.lat - 10)/20)*100;
+
+        const marker =
+            document.createElement(
+                "button"
+            );
+
+        marker.className =
+            `absolute rounded-full border-2 border-white shadow-lg ${
+                station.status === "Major"
+                ? "bg-red-600 w-5 h-5"
+                : "bg-orange-500 w-4 h-4"
+            }`;
+
+        marker.style.left =
+            `${Math.max(1,
+            Math.min(98,left))}%`;
+
+        marker.style.top =
+            `${Math.max(1,
+            Math.min(98,top))}%`;
+
+        marker.title =
+            station.name;
+
+        marker.onclick = () =>
+            showDetails(station);
+
+        container.appendChild(
+            marker
+        );
+
+    });
+
+}
+
+function showDetails(station){
+
+    document.getElementById(
+        "details"
+    ).innerHTML = `
+        <div class="space-y-3">
+
+            <div class="font-bold text-lg">
+                ${station.name}
+            </div>
+
+            <div>
+                Status:
+                <span class="${
+                    station.status==="Major"
+                    ? "text-red-500"
+                    : "text-orange-400"
+                } font-bold">
+                ${station.status}
+                </span>
+            </div>
+
+            <div>
+                Current Level:
+                <strong>${station.level}m</strong>
+            </div>
+
+            <div>
+                Observed:
+                ${station.timestamp}
+            </div>
+
+            <div>
+                Basin:
+                ${station.basin}
+            <  <div>
+                Stream:
+                ${station.stream}
+            </div>
+
+            <hr class="border-slate-700">
+
+            <div>
+                Minor:
+                ${station.thresholds?.minor ?? "-"}m
+            </div>
+
+            <div>
+                Moderate:
+                ${station.thresholds?.moderate ?? "-"}m
+            </div>
+
+            <div>
+                Major:
+                ${station.thresholds?.major ?? "-"}m
+            </div>
+
+        </div>
+    `;
+}
+
+function renderList(stations){
+
+    const container =
+        document.getElementById(
+            "stationList"
+        );
+
+    container.innerHTML = "";
+
+    stations.forEach(station=>{
+
+        const button =
+            document.createElement(
+                "button"
+            );
+
+        button.className =
+            "w-full text-left rounded-xl border border-slate-700 bg-slate-800 p-3 hover:bg-slate-700";
+
+        button.innerHTML = `
+            <div class="flex justify-between">
+
+                <div>
+
+                    <div class="font-semibold">
+                        ${station.name}
+                    </div>
+
+                    <div class="text-sm text-slate-400">
+                        ${station.stream}
+                    </div>
+
+                    <div class="text-xs text-slate-500">
+                        ${station.basin}
+                    </div>
+
+                </div>
+
+                <div class="${
+                    station.status==="Major"
+                    ? "text-red-500"
+                    : "text-orange-400"
+                } font-bold">
+
+                    ${station.status}
+
+                </div>
+
+            </div>
+
+            <div class="mt-2 text-sm">
+                Level:
+                <strong>${station.level}m</strong>
+            </div>
+        `;
+
+        button.onclick =
+            () =>
+                showDetails(
+                    station
+                );
+
+        container.appendChild(
+            button
+        );
+
+    });
+
+}
+
+document
+.getElementById("search")
+.addEventListener(
+    "input",
+    render
+);
+
+loadData();
+
+setInterval(
+    loadData,
+    300000
+);
+</script>
+
+</body>
+</html>
