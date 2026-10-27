@@ -353,16 +353,31 @@ async function enrichStation(
       fwo.plt;
 
     const live =
-      await getLatestLevel(
-        fwo.tbl
-      );
+  await getLatestLevel(
+    fwo.tbl
+  );
 
-    if (live) {
-      station.level =
-        live.level;
+if (live) {
 
-      station.timestamp =
-        live.timestamp;
+  station.level =
+    live.level;
+
+  station.timestamp =
+    live.timestamp;
+
+  station.previousLevel =
+    live.previousLevel;
+
+  station.change =
+    live.change;
+
+  station.trend =
+    live.trend;
+
+  station.rapidRise =
+    live.rapidRise;
+
+}
     }
 
     const thresholds =
