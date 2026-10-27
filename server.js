@@ -17,6 +17,9 @@ const http = axios.create({
   }
 });
 
+const STATION_INDEX =
+  "https://www.bom.gov.au/qld/flood/networks/section3.shtml";
+
 const FLOOD_PAGES = [
   "https://www.bom.gov.au/qld/flood/brisbane.shtml",
   "https://www.bom.gov.au/qld/flood/mary.shtml",
@@ -32,20 +35,16 @@ const FLOOD_PAGES = [
   "https://www.bom.gov.au/qld/flood/north.shtml"
 ];
 
-const STATION_INDEX =
-  "https://www.bom.gov.au/qld/flood/networks/section3.shtml";
-
 let gauges = [];
 let updated = null;
 
 function classify(level, thresholds) {
-  if (level == null) {
-  return "Unknown";
-}
 
-if (!thresholds) {
-  return "No Thresholds";
-}
+  if (
+    level == null ||
+    !thresholds
+  ) {
+    return "Unknown";
   }
 
   if (
@@ -72,7 +71,11 @@ if (!thresholds) {
   return "Normal";
 }
 
-function dmsToDecimal(latRaw, lonRaw) {
+function dmsToDecimal(
+  latRaw,
+  lonRaw
+) {
+
   const lat =
     -(
       parseInt(latRaw.slice(0, 2)) +
@@ -85,10 +88,40 @@ function dmsToDecimal(latRaw, lonRaw) {
     parseInt(lonRaw.slice(3, 5)) / 60 +
     parseInt(lonRaw.slice(5, 7)) / 3600;
 
-  return { lat, lon };
+  return {
+    lat,
+    lon
+  };
+}
+
+function determineTrend(
+  current,
+  previous
+) {
+
+  if (
+    current == null ||
+    previous == null
+  ) {
+    return "unknown";
+  }
+
+  const diff =
+    current - previous;
+
+  if (diff > 0.02) {
+    return "rising";
+  }
+
+  if (diff < -0.02) {
+    return "falling";
+  }
+
+  return "steady";
 }
 
 async function loadCatalogue() {
+
   const response =
     await http.get(STATION_INDEX);
 
@@ -98,19 +131,20 @@ async function loadCatalogue() {
   const text =
     $("pre").text();
 
-  const lines =
-    text.split("\n");
-
   const stations = [];
 
-  for (const line of lines) {
-    const match = line.match(
-      /^\s*(\d{6})\s+(\d+)?\s+(.+?)\s{2,}(.+?)\s{2,}(.+?)\s+(\d{6,7}S)\s+(\d{7}E)\s*$/
-    );
+  text.split("\n")
+    .forEach(line => {
 
-    if (!match) continue;
+      const match =
+        line.match(
+          /^\s*(\d{6})\s+(\d+)?\s+(.+?)\s{2,}(.+?)\s{2,}(.+?)\s+(\d{6,7}S)\s+(\d{7}E)\s*$/
+        );
 
-    try {
+      if (!match) {
+        return;
+      }
+
       const coords =
         dmsToDecimal(
           match[6],
@@ -118,28 +152,47 @@ async function loadCatalogue() {
         );
 
       stations.push({
+
         id: match[1],
-        name: match[3].trim(),
-        stream: match[4].trim(),
-        basin: match[5].trim(),
+
+        name:
+          match[3].trim(),
+
+        stream:
+          match[4].trim(),
+
+        basin:
+          match[5].trim(),
+
         lat: coords.lat,
         lon: coords.lon,
+
         level: null,
+        previousLevel: null,
+        change: null,
+        trend: "unknown",
+        rapidRise: false,
+
         timestamp: null,
+
         thresholds: null,
+
         status: "Unknown"
       });
-    } catch {}
-  }
+
+    });
 
   return stations;
 }
 
 async function buildFwoLookup() {
+
   const lookup = {};
 
   for (const page of FLOOD_PAGES) {
+
     try {
+
       const response =
         await http.get(page);
 
@@ -147,6 +200,7 @@ async function buildFwoLookup() {
         cheerio.load(response.data);
 
       $("area").each((_, area) => {
+
         const href =
           $(area).attr("href");
 
@@ -160,42 +214,37 @@ async function buildFwoLookup() {
         if (!match) return;
 
         lookup[match[2]] = {
+
           idq: match[1],
+
           plt:
             `https://www.bom.gov.au${href}`,
+
           tbl:
             `https://www.bom.gov.au${href.replace(
               ".plt.shtml",
               ".tbl.shtml"
             )}`
+
         };
+
       });
 
     } catch (err) {
+
       console.log(
-        "Failed page:",
+        "Failed:",
         page
       );
+
     }
+
   }
 
   return lookup;
 }
 
 async function getLatestLevel(tblUrl) {
-  try {
-    const response =
-      await http.get(tblUrl);
-
-    const $ =
-      cheerio.load(response.data);
-
-    const rows = [];
-
-    $("tr").each((_, tr) => {
-      const cols = [];
-
-     async function getLatestLevel(tblUrl) {
 
   try {
 
@@ -235,45 +284,34 @@ async function getLatestLevel(tblUrl) {
     const previous =
       rows[rows.length - 2];
 
-    const currentLevel =
+    const level =
       parseFloat(latest[1]);
 
     const previousLevel =
       parseFloat(previous[1]);
 
     const change =
-      currentLevel -
-      previousLevel;
-
-    let trend =
-      "steady";
-
-    if (change > 0.02) {
-      trend = "rising";
-    }
-
-    if (change < -0.02) {
-      trend = "falling";
-    }
-
-    const rapidRise =
-      change >= 0.50;
+      level - previousLevel;
 
     return {
 
       timestamp:
         latest[0],
 
-      level:
-        currentLevel,
+      level,
 
       previousLevel,
 
       change,
 
-      trend,
+      trend:
+        determineTrend(
+          level,
+          previousLevel
+        ),
 
-      rapidRise
+      rapidRise:
+        change >= 0.50
 
     };
 
@@ -284,11 +322,11 @@ async function getLatestLevel(tblUrl) {
   }
 
 }
-  }
-}
 
 async function getThresholds(fwo) {
+
   try {
+
     const response =
       await http.get(fwo.plt);
 
@@ -334,56 +372,51 @@ async function getThresholds(fwo) {
       : null;
 
   } catch {
+
     return null;
+
   }
+
 }
 
 async function enrichStation(
   station,
   fwo
 ) {
+
   try {
-    station.fwoId =
-      fwo.idq;
-
-    station.tbl =
-      fwo.tbl;
-
-    station.plt =
-      fwo.plt;
 
     const live =
-  await getLatestLevel(
-    fwo.tbl
-  );
-
-if (live) {
-
-  station.level =
-    live.level;
-
-  station.timestamp =
-    live.timestamp;
-
-  station.previousLevel =
-    live.previousLevel;
-
-  station.change =
-    live.change;
-
-  station.trend =
-    live.trend;
-
-  station.rapidRise =
-    live.rapidRise;
-
-}
-    }
+      await getLatestLevel(
+        fwo.tbl
+      );
 
     const thresholds =
       await getThresholds(
         fwo
       );
+
+    if (live) {
+
+      station.level =
+        live.level;
+
+      station.previousLevel =
+        live.previousLevel;
+
+      station.change =
+        live.change;
+
+      station.trend =
+        live.trend;
+
+      station.rapidRise =
+        live.rapidRise;
+
+      station.timestamp =
+        live.timestamp;
+
+    }
 
     station.thresholds =
       thresholds;
@@ -394,119 +427,97 @@ if (live) {
         thresholds
       );
 
-  } catch {
-    station.status =
-      "Unknown";
-  }
+    station.fwoId =
+      fwo.idq;
+
+    station.tbl =
+      fwo.tbl;
+
+    station.plt =
+      fwo.plt;
+
+  } catch {}
 
   return station;
 }
 
 async function refresh() {
-  try {
 
-    console.log(
-      "Loading catalogue..."
+  console.log(
+    "Loading catalogue..."
+  );
+
+  const stationList =
+    await loadCatalogue();
+
+  const lookup =
+    await buildFwoLookup();
+
+  gauges = stationList;
+
+  updated =
+    new Date().toISOString();
+
+  const matchedStations =
+    stationList.filter(
+      s => lookup[s.id]
     );
 
-    const stationList =
-      await loadCatalogue();
+  console.log(
+    `Matched: ${matchedStations.length}`
+  );
 
-    console.log(
-      `Stations: ${stationList.length}`
-    );
+  const batchSize = 50;
 
-    const lookup =
-      await buildFwoLookup();
+  for (
+    let i = 0;
+    i < matchedStations.length;
+    i += batchSize
+  ) {
 
-    console.log(
-      `FWO Links: ${Object.keys(lookup).length}`
-    );
-
-    gauges =
-      stationList;
-
-    updated =
-      new Date().toISOString();
-
-    const matchedStations =
-      stationList.filter(
-        s => lookup[s.id]
+    const batch =
+      matchedStations.slice(
+        i,
+        i + batchSize
       );
 
-    console.log(
-      `Matched: ${matchedStations.length}`
-    );
-
-    const batchSize = 50;
-
-    for (
-      let i = 0;
-      i < matchedStations.length;
-      i += batchSize
-    ) {
-
-      const batch =
-        matchedStations.slice(
-          i,
-          i + batchSize
-        );
-
-      await Promise.all(
-        batch.map(station =>
+    await Promise.all(
+      batch.map(
+        station =>
           enrichStation(
             station,
             lookup[station.id]
           )
-        )
-      );
-
-      console.log(
-        `${Math.min(
-          i + batchSize,
-          matchedStations.length
-        )}/${matchedStations.length}`
-      );
-    }
-
-    gauges =
-      stationList;
-
-    updated =
-      new Date().toISOString();
-
-    const flooded =
-      gauges.filter(
-        g =>
-          g.status === "Major" ||
-          g.status === "Moderate"
-      );
-
-    console.log(
-      `Flooded stations: ${flooded.length}`
+      )
     );
 
     console.log(
-      "Refresh complete"
+      `${Math.min(
+        i + batchSize,
+        matchedStations.length
+      )}/${matchedStations.length}`
     );
-
-  } catch (err) {
-
-    console.error(
-      "REFRESH FAILED",
-      err
-    );
-
   }
+
+  gauges = stationList;
+
+  updated =
+    new Date().toISOString();
+
+  console.log(
+    "Refresh complete"
+  );
 }
 
 app.get("/api/status", (req, res) => {
+
   res.json({
     status: "online",
     gauges:
       gauges.length,
     updated
   });
+
 });
 
 app.get("/api/gauges", (req, res) => {
@@ -514,6 +525,7 @@ app.get("/api/gauges", (req, res) => {
 });
 
 app.get("/api/flooded", (req, res) => {
+
   res.json(
     gauges.filter(
       g =>
@@ -521,25 +533,31 @@ app.get("/api/flooded", (req, res) => {
         g.status === "Moderate"
     )
   );
+
 });
 
 app.get("/api/major", (req, res) => {
+
   res.json(
     gauges.filter(
       g =>
         g.status === "Major"
     )
   );
+
 });
 
 app.get("/api/moderate", (req, res) => {
+
   res.json(
     gauges.filter(
       g =>
         g.status === "Moderate"
     )
   );
+
 });
+
 app.get("/api/catchments", (req, res) => {
 
   const flooded =
@@ -549,7 +567,7 @@ app.get("/api/catchments", (req, res) => {
         g.status === "Moderate"
     );
 
-  const catchments = {};
+  const groups = {};
 
   for (const gauge of flooded) {
 
@@ -558,90 +576,79 @@ app.get("/api/catchments", (req, res) => {
       gauge.basin ||
       "Unknown";
 
-    if (!catchments[catchment]) {
-      catchments[catchment] = [];
+    if (!groups[catchment]) {
+      groups[catchment] = [];
     }
 
-    catchments[catchment].push({
-      id: gauge.id,
-      name: gauge.name,
-      stream: gauge.stream,
-      basin: gauge.basin,
-      level: gauge.level,
-      status: gauge.status,
-      timestamp: gauge.timestamp,
-      thresholds: gauge.thresholds,
-      lat: gauge.lat,
-      lon: gauge.lon
-    });
+    groups[catchment].push(gauge);
+
   }
 
   res.json(
-    Object.entries(catchments)
-      .map(([catchment, stations]) => ({
+    Object.entries(groups).map(
+      ([catchment, stations]) => ({
         catchment,
         stations
-      }))
-      .sort(
-        (a, b) =>
-          b.stations.length -
-          a.stations.length
-      )
+      })
+    )
   );
 
 });
 
-app.get("/api/catchment-summary", (req, res) => {
+app.get(
+  "/api/catchment-summary",
+  (req, res) => {
 
-  const flooded =
-    gauges.filter(
-      g =>
-        g.status === "Major" ||
-        g.status === "Moderate"
+    const flooded =
+      gauges.filter(
+        g =>
+          g.status === "Major" ||
+          g.status === "Moderate"
+      );
+
+    const summary = {};
+
+    for (const gauge of flooded) {
+
+      const catchment =
+        gauge.stream ||
+        gauge.basin ||
+        "Unknown";
+
+      if (!summary[catchment]) {
+
+        summary[catchment] = {
+          catchment,
+          stations: 0,
+          major: 0,
+          moderate: 0
+        };
+
+      }
+
+      summary[catchment].stations++;
+
+      if (
+        gauge.status === "Major"
+      ) {
+        summary[catchment].major++;
+      }
+
+      if (
+        gauge.status === "Moderate"
+      ) {
+        summary[catchment].moderate++;
+      }
+
+    }
+
+    res.json(
+      Object.values(summary)
     );
 
-  const summary = {};
-
-  for (const gauge of flooded) {
-
-    const catchment =
-      gauge.stream ||
-      gauge.basin ||
-      "Unknown";
-
-    if (!summary[catchment]) {
-
-      summary[catchment] = {
-        catchment,
-        stations: 0,
-        major: 0,
-        moderate: 0
-      };
-
-    }
-
-    summary[catchment].stations++;
-
-    if (gauge.status === "Major") {
-      summary[catchment].major++;
-    }
-
-    if (gauge.status === "Moderate") {
-      summary[catchment].moderate++;
-    }
-
   }
+);
 
-  res.json(
-    Object.values(summary)
-      .sort(
-        (a, b) =>
-          b.stations -
-          a.stations
-      )
-  );
-
-});
 app.listen(PORT, () => {
 
   console.log(
