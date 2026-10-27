@@ -1,6 +1,7 @@
 import express from "express";
 import cors from "cors";
 import axios from "axios";
+import * as cheerio from "cheerio";
 
 const app = express();
 
@@ -8,25 +9,33 @@ app.use(cors());
 
 const PORT = process.env.PORT || 3001;
 
+const http = axios.create({
+  timeout: 30000,
+  headers: {
+    "User-Agent":
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131 Safari/537.36",
+    "Accept-Language":
+      "en-AU,en;q=0.9"
+  }
+});
+
 app.get("/api/debug", async (req, res) => {
 
   try {
 
     const url =
-      "https://www.bom.gov.au/qld/flood/networks/rv_stn.kmz";
+      "https://www.bom.gov.au/qld/flood/networks/section3.shtml";
 
     const response =
-      await axios.get(url, {
-        responseType: "arraybuffer"
-      });
+      await http.get(url);
+
+    const html =
+      response.data;
 
     res.json({
-      size:
-        response.data.length,
-      contentType:
-        response.headers["content-type"],
-      status:
-        response.status
+      length: html.length,
+      first5000:
+        html.substring(0, 5000)
     });
 
   } catch (err) {
