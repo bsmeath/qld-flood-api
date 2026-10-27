@@ -39,8 +39,13 @@ let gauges = [];
 let updated = null;
 
 function classify(level, thresholds) {
-  if (level == null || !thresholds) {
-    return "Unknown";
+  if (level == null) {
+  return "Unknown";
+}
+
+if (!thresholds) {
+  return "No Thresholds";
+}
   }
 
   if (
