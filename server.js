@@ -9,18 +9,19 @@ app.use(cors());
 
 const PORT = process.env.PORT || 3001;
 
+const ROOT =
+  "https://www.bom.gov.au/qld/flood/rain_river.shtml";
+
 const HEADERS = {
   "User-Agent":
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131 Safari/537.36",
-  Accept:
+  "Accept":
     "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
   "Accept-Language":
     "en-AU,en;q=0.9",
-  Referer: "https://www.bom.gov.au/"
+  "Referer":
+    "https://www.bom.gov.au/"
 };
-
-const ROOT =
-  "https://www.bom.gov.au/qld/flood/rain_river.shtml";
 
 const http = axios.create({
   timeout: 30000,
@@ -28,119 +29,143 @@ const http = axios.create({
   maxRedirects: 10
 });
 
-app.get("/api/status", async (req, res) => {
+app.get("/api/status", (req, res) => {
   res.json({
     status: "online"
   });
 });
 
+app.get("/api/test-gauge", async (req, res) => {
+  try {
+
+    const response = await http.get(ROOT);
+
+    res.json({
+      success: true,
+      status: response.status,
+      bytes: response.data.length
+    });
+
+  } catch (err) {
+
+    res.status(500).json({
+      success: false,
+      status: err.response?.status,
+      message: err.message
+    });
+
+  }
+});
+
 app.get("/api/discovery", async (req, res) => {
 
-  const rootPage =
-    await http.get(ROOT);
+  try {
 
-  const $ =
-    cheerio.load(rootPage.data);
+    const rootPage =
+      await http.get(ROOT);
 
-  const catchmentPages =
-    [];
+    const $ =
+      cheerio.load(rootPage.data);
 
-  $("a").each((_, a) => {
+    const catchmentPages =
+      [];
 
-    const href =
-      $(a).attr("href");
+    $("a").each((_, a) => {
 
-    if (!href) return;
+      const href =
+        $(a).attr("href");
 
-    if (
-      href.includes("/qld/flood/") &&
-      href.endsWith(".shtml")
-    ) {
+      if (!href) return;
 
-      catchmentPages.push(
-        new URL(
-          href,
-          ROOT
-        ).href
-      );
-    }
-  });
+      if (
+        href.includes("/qld/flood/") &&
+        href.endsWith(".shtml")
+      ) {
 
-  const stationMap =
-    new Map();
+        catchmentPages.push(
+          new URL(
+            href,
+            ROOT
+          ).href
+        );
+      }
+    });
 
-  for (const page of catchmentPages) {
+    res.json({
+      catchments:
+        catchmentPages.length,
+      sample:
+        catchmentPages.slice(0, 20)
+    });
 
-    try {
+  } catch (err) {
 
-      const r =
-        await http.get(page);
-
-      const $page =
-        cheerio.load(r.data);
-
-      $page("a").each(
-        (_, link) => {
-
-          const href =
-            $page(link)
-              .attr("href") || "";
-
-          const text =
-            $page(link)
-              .text()
-              .trim();
-
-          const match =
-            href.match(
-              /\.([0-9]{6})\.plt\.shtml/i
-            );
-
-          if (!match) return;
-
-          const id =
-            match[1];
-
-          stationMap.set(id, {
-            id,
-            name:
-              text || id,
-            url:
-              new URL(
-                href,
-                page
-              ).href,
-            source:
-              page
-          });
-
-        }
-      );
-
-    } catch (err) {
-
-      console.log(
-        page,
+    res.status(500).json({
+      status:
+        err.response?.status,
+      message:
         err.message
-      );
+    });
 
-    }
   }
 
-  res.json({
-    catchments:
-      catchmentPages.length,
-    stations:
-      stationMap.size,
-    sample:
-      [...stationMap.values()]
-        .slice(0, 20)
-  });
+});
+
+app.get("/api/debug", async (req, res) => {
+
+  try {
+
+    const page =
+      "https://www.bom.gov.au/qld/flood/brisbane.shtml";
+
+    const response =
+      await http.get(page);
+
+    const $ =
+      cheerio.load(response.data);
+
+    const links =
+      [];
+
+    $("a").each((_, link) => {
+
+      links.push({
+        text:
+          $(link)
+            .text()
+            .trim(),
+        href:
+          $(link)
+            .attr("href")
+      });
+
+    });
+
+    res.json({
+      page,
+      count:
+        links.length,
+      sample:
+        links.slice(0, 100)
+    });
+
+  } catch (err) {
+
+    res.status(500).json({
+      status:
+        err.response?.status,
+      message:
+        err.message
+    });
+
+  }
 
 });
 
 app.listen(PORT, () => {
+
   console.log(
-    `Running on ${PORT}`
+    `QLD Flood API listening on ${PORT}`
   );
+
 });
