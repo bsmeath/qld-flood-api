@@ -9,9 +9,6 @@ app.use(cors());
 
 const PORT = process.env.PORT || 3001;
 
-const STATION_INDEX =
-  "https://www.bom.gov.au/qld/flood/networks/section3.shtml";
-
 const http = axios.create({
   timeout: 30000,
   headers: {
@@ -22,189 +19,45 @@ const http = axios.create({
   }
 });
 
-let gaugeCache = [];
-let lastRefresh = null;
-
-function convertLatLon(latRaw, lonRaw) {
-
-  const latDeg =
-    parseInt(latRaw.substring(0, 2));
-
-  const latMin =
-    parseInt(latRaw.substring(2, 4));
-
-  const latSec =
-    parseInt(latRaw.substring(4, 6));
-
-  const lat =
-    -(
-      latDeg +
-      latMin / 60 +
-      latSec / 3600
-    );
-
-  const lonDeg =
-    parseInt(lonRaw.substring(0, 3));
-
-  const lonMin =
-    parseInt(lonRaw.substring(3, 5));
-
-  const lonSec =
-    parseInt(lonRaw.substring(5, 7));
-
-  const lon =
-    lonDeg +
-    lonMin / 60 +
-    lonSec / 3600;
-
-  return {
-    lat,
-    lon
-  };
-}
-
-async function loadStations() {
-
-  const response =
-    await http.get(STATION_INDEX);
-
-  const html =
-    response.data;
-
-  const $ =
-    cheerio.load(html);
-
-  const text =
-    $("pre").text();
-
-  const lines =
-    text.split("\n");
-
-  const stations = [];
-
-  for (const line of lines) {
-
-    const match = line.match(
-      /^\s*(\d{6})\s+(\d+)?\s+(.+?)\s{2,}(.+?)\s{2,}(.+?)\s+(\d{6,7}S)\s+(\d{7}E)\s*$/
-    );
-
-    if (!match) continue;
-
-    try {
-
-      const coords =
-        convertLatLon(
-          match[6],
-          match[7]
-        );
-
-      stations.push({
-        id: match[1],
-        awrc: match[2] || "",
-        name: match[3].trim(),
-        stream: match[4].trim(),
-        basin: match[5].trim(),
-        lat: coords.lat,
-        lon: coords.lon,
-
-        level: null,
-        status: "Unknown",
-        history: []
-      });
-
-    } catch (err) {
-      console.log(
-        "Parse error:",
-        err.message
-      );
-    }
-  }
-
-  return stations;
-}
-
-async function refreshStations() {
-
+app.get("/api/debug", async (req, res) => {
   try {
+    const url =
+      "https://www.bom.gov.au/qld/flood/brisbane.shtml";
 
-    console.log(
-      "Loading Queensland station catalogue..."
-    );
+    const response =
+      await http.get(url);
 
-    gaugeCache =
-      await loadStations();
+    const $ =
+      cheerio.load(response.data);
 
-    lastRefresh =
-      new Date().toISOString();
+    const urls = [];
 
-    console.log(
-      `Loaded ${gaugeCache.length} stations`
-    );
+    $("a").each((_, a) => {
+      const href =
+        $(a).attr("href");
+
+      if (!href) return;
+
+      urls.push(href);
+    });
+
+    res.json({
+      count: urls.length,
+      urls
+    });
 
   } catch (err) {
 
-    console.error(
-      "Refresh failed:",
-      err.message
-    );
-
-  }
-}
-
-app.get("/api/status", (req, res) => {
-
-  res.json({
-    status: "online",
-    gauges:
-      gaugeCache.length,
-    updated:
-      lastRefresh
-  });
-
-});
-
-app.get("/api/gauges", (req, res) => {
-
-  res.json(
-    gaugeCache
-  );
-
-});
-
-app.get("/api/gauges/:id", (req, res) => {
-
-  const gauge =
-    gaugeCache.find(
-      g => g.id === req.params.id
-    );
-
-  if (!gauge) {
-
-    return res.status(404).json({
-      error:
-        "Gauge not found"
+    res.status(500).json({
+      status:
+        err.response?.status,
+      message:
+        err.message
     });
 
   }
-
-  res.json(gauge);
-
 });
 
-app.listen(
-  PORT,
-  async () => {
-
-    console.log(
-      `QLD Flood API listening on ${PORT}`
-    );
-
-    await refreshStations();
-
-    setInterval(
-      refreshStations,
-      5 * 60 * 1000
-    );
-
-  }
-);
+app.listen(PORT, () => {
+  console.log(`Listening on ${PORT}`);
+});
