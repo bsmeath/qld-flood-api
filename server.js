@@ -15,21 +15,12 @@ const HEADERS = {
   "Accept":
     "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
   "Accept-Language":
-    "en-AU,en;q=0.9",
-  "Referer":
-    "https://www.bom.gov.au/"
+    "en-AU,en;q=0.9"
 };
 
 const http = axios.create({
   timeout: 30000,
-  headers: HEADERS,
-  maxRedirects: 10
-});
-
-app.get("/api/status", (req, res) => {
-  res.json({
-    status: "online"
-  });
+  headers: HEADERS
 });
 
 app.get("/api/debug", async (req, res) => {
@@ -45,25 +36,43 @@ app.get("/api/debug", async (req, res) => {
     const $ =
       cheerio.load(response.data);
 
-    const bodyText =
-      $("body").text();
+    const links = [];
 
-    const gaugeMatches =
-      bodyText.match(
-        /\d{6}/g
-      ) || [];
+    $("a").each((_, a) => {
+
+      const href =
+        $(a).attr("href") || "";
+
+      const text =
+        $(a).text().trim();
+
+      const combined =
+        `${text} ${href}`.toLowerCase();
+
+      if (
+        combined.includes("river") ||
+        combined.includes("height") ||
+        combined.includes("station") ||
+        combined.includes("plot") ||
+        combined.includes("gauge") ||
+        combined.includes("data")
+      ) {
+
+        links.push({
+          text,
+          href
+        });
+
+      }
+
+    });
 
     res.json({
-      page,
-      pageLength:
-        bodyText.length,
-      sixDigitNumbers:
-        [...new Set(gaugeMatches)]
-          .slice(0, 100),
       title:
-        $("title")
-          .text()
-          .trim()
+        $("title").text(),
+      count:
+        links.length,
+      links
     });
 
   } catch (err) {
@@ -81,6 +90,6 @@ app.get("/api/debug", async (req, res) => {
 
 app.listen(PORT, () => {
   console.log(
-    `QLD Flood API listening on ${PORT}`
+    `Listening on ${PORT}`
   );
 });
