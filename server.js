@@ -12,69 +12,66 @@ const PORT = process.env.PORT || 3001;
 const HEADERS = {
   "User-Agent":
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131 Safari/537.36",
-  "Accept":
+  Accept:
     "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
   "Accept-Language":
     "en-AU,en;q=0.9",
-  "Referer":
-    "https://www.bom.gov.au/"
+  Referer: "https://www.bom.gov.au/"
 };
 
 const ROOT =
   "https://www.bom.gov.au/qld/flood/rain_river.shtml";
 
-app.get("/api/status", (req, res) => {
+const http = axios.create({
+  timeout: 30000,
+  headers: HEADERS,
+  maxRedirects: 10
+});
+
+app.get("/api/status", async (req, res) => {
   res.json({
     status: "online"
   });
 });
 
 app.get("/api/discovery", async (req, res) => {
-  try {
 
-    const response =
-      await axios.get(ROOT, {
-        headers: HEADERS,
-        timeout: 30000
-      });
+  const rootPage =
+    await http.get(ROOT);
 
-    const $ = cheerio.load(response.data);
+  const $ =
+    cheerio.load(rootPage.data);
 
-    const links = [];
+  const catchmentPages =
+    [];
 
-    $("a").each((_, link) => {
+  $("a").each((_, a) => {
 
-      const href =
-        $(link).attr("href");
+    const href =
+      $(a).attr("href");
 
-      if (!href) return;
+    if (!href) return;
 
-      if (href.endsWith(".shtml")) {
-        links.push(
-          new URL(
-            href,
-            ROOT
-          ).href
-        );
-      }
-    });
+    if (
+      href.includes("/qld/flood/") &&
+      href.endsWith(".shtml")
+    ) {
 
-    res.json({
-      count: links.length,
-      sample: links.slice(0, 20)
-    });
+      catchmentPages.push(
+        new URL(
+          href,
+          ROOT
+        ).href
+      );
+    }
+  });
 
-  } catch (err) {
+  const stationMap =
+    new Map();
 
-    res.status(500).json({
-      error: err.message,
-      status:
-        err.response?.status
-    });
+  for (const page of catchmentPages) {
 
-  }
-});
+    try {
 
-app.listen(PORT, () => {
-  console.log(`Running on ${PORT}`);
-});
+      const r =
+        await http.
