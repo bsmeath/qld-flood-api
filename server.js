@@ -195,6 +195,22 @@ async function getLatestLevel(tblUrl) {
     $("tr").each((_, tr) => {
       const cols = [];
 
+     async function getLatestLevel(tblUrl) {
+
+  try {
+
+    const response =
+      await http.get(tblUrl);
+
+    const $ =
+      cheerio.load(response.data);
+
+    const rows = [];
+
+    $("tr").each((_, tr) => {
+
+      const cols = [];
+
       $(tr)
         .find("td")
         .each((__, td) => {
@@ -206,23 +222,68 @@ async function getLatestLevel(tblUrl) {
       if (cols.length >= 2) {
         rows.push(cols);
       }
+
     });
 
-    if (!rows.length) {
+    if (rows.length < 2) {
       return null;
     }
 
     const latest =
       rows[rows.length - 1];
 
+    const previous =
+      rows[rows.length - 2];
+
+    const currentLevel =
+      parseFloat(latest[1]);
+
+    const previousLevel =
+      parseFloat(previous[1]);
+
+    const change =
+      currentLevel -
+      previousLevel;
+
+    let trend =
+      "steady";
+
+    if (change > 0.02) {
+      trend = "rising";
+    }
+
+    if (change < -0.02) {
+      trend = "falling";
+    }
+
+    const rapidRise =
+      change >= 0.50;
+
     return {
-      timestamp: latest[0],
+
+      timestamp:
+        latest[0],
+
       level:
-        parseFloat(latest[1])
+        currentLevel,
+
+      previousLevel,
+
+      change,
+
+      trend,
+
+      rapidRise
+
     };
 
   } catch {
+
     return null;
+
+  }
+
+}
   }
 }
 
