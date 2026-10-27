@@ -9,7 +9,7 @@ app.use(cors());
 const PORT = process.env.PORT || 3001;
 
 const TEST_URL =
-  "https://www.bom.gov.au/fwo/IDQ65388/IDQ65388.540230.plt.shtml";
+  "https://www.bom.gov.au/fwo/IDQ65388/IDQ65388.540230.tbl.shtml";
 
 app.get("/api/debug", async (req, res) => {
   try {
