@@ -1,5 +1,6 @@
 import express from "express";
 import cors from "cors";
+import axios from "axios";
 
 const app = express();
 
@@ -7,79 +8,52 @@ app.use(cors());
 
 const PORT = process.env.PORT || 3001;
 
-let gaugeCache = [
-  {
-    id: "041499",
-    name: "Condamine River at Tummaville",
-    catchment: "Condamine-Balonne",
-    level: 9.8,
-    status: "Major",
-    lat: -27.9,
-    lon: 151.4,
-    history: [
-      { timestamp: "2026-10-27 08:00", level: 9.8 },
-      { timestamp: "2026-10-27 07:00", level: 9.6 }
-    ]
-  },
-  {
-    id: "540001",
-    name: "Brisbane River",
-    catchment: "Brisbane",
-    level: 4.2,
-    status: "Minor",
-    lat: -27.47,
-    lon: 153.03,
-    history: [
-      { timestamp: "2026-10-27 08:00", level: 4.2 },
-      { timestamp: "2026-10-27 07:00", level: 4.1 }
-    ]
-  },
-  {
-    id: "130003",
-    name: "Fitzroy River",
-    catchment: "Fitzroy",
-    level: 7.1,
-    status: "Moderate",
-    lat: -23.38,
-    lon: 150.51,
-    history: [
-      { timestamp: "2026-10-27 08:00", level: 7.1 },
-      { timestamp: "2026-10-27 07:00", level: 6.9 }
-    ]
-  }
-];
-
-let lastRefresh = new Date().toISOString();
+const HEADERS = {
+  "User-Agent":
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131 Safari/537.36",
+  "Accept":
+    "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+  "Accept-Language":
+    "en-AU,en;q=0.9",
+  "Referer":
+    "https://www.bom.gov.au/"
+};
 
 app.get("/api/status", (req, res) => {
   res.json({
-    status: "online",
-    gauges: gaugeCache.length,
-    discovered: gaugeCache.length,
-    updated: lastRefresh
+    status: "online"
   });
 });
 
-app.get("/api/gauges", (req, res) => {
-  res.json(gaugeCache);
-});
+app.get("/api/test-gauge", async (req, res) => {
+  try {
 
-app.get("/api/gauges/:id", (req, res) => {
-  const gauge = gaugeCache.find(
-    g => g.id === req.params.id
-  );
+    const url =
+      "https://www.bom.gov.au/qld/flood/";
 
-  if (!gauge) {
-    return res.status(404).json({
-      error: "Gauge not found"
+    const response = await axios.get(url, {
+      headers: HEADERS,
+      timeout: 30000,
+      maxRedirects: 10
     });
-  }
 
-  res.json(gauge);
+    res.json({
+      success: true,
+      status: response.status,
+      bytes: response.data.length
+    });
+
+  } catch (err) {
+
+    res.status(500).json({
+      success: false,
+      status: err.response?.status,
+      message: err.message
+    });
+
+  }
 });
 
 app.listen(PORT, () => {
-  console.log(
-    `QLD Flood API listening on ${PORT}`
-  );
+  console.log(`Listening on ${PORT}`);
 });
