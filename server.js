@@ -20,18 +20,19 @@ const HEADERS = {
 
 const http = axios.create({
   timeout: 30000,
-  headers: HEADERS
+  headers: HEADERS,
+  maxRedirects: 10
 });
 
 app.get("/api/debug", async (req, res) => {
 
   try {
 
-    const page =
-      "https://www.bom.gov.au/qld/flood/brisbane.shtml";
+    const url =
+      "https://www.bom.gov.au/qld/flood/networks/index.shtml";
 
     const response =
-      await http.get(page);
+      await http.get(url);
 
     const $ =
       cheerio.load(response.data);
@@ -40,39 +41,24 @@ app.get("/api/debug", async (req, res) => {
 
     $("a").each((_, a) => {
 
-      const href =
-        $(a).attr("href") || "";
-
-      const text =
-        $(a).text().trim();
-
-      const combined =
-        `${text} ${href}`.toLowerCase();
-
-      if (
-        combined.includes("river") ||
-        combined.includes("height") ||
-        combined.includes("station") ||
-        combined.includes("plot") ||
-        combined.includes("gauge") ||
-        combined.includes("data")
-      ) {
-
-        links.push({
-          text,
-          href
-        });
-
-      }
+      links.push({
+        text:
+          $(a).text().trim(),
+        href:
+          $(a).attr("href")
+      });
 
     });
 
     res.json({
       title:
-        $("title").text(),
+        $("title")
+          .text()
+          .trim(),
       count:
         links.length,
-      links
+      sample:
+        links.slice(0, 200)
     });
 
   } catch (err) {
