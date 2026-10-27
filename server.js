@@ -459,7 +459,108 @@ app.get("/api/moderate", (req, res) => {
     )
   );
 });
+app.get("/api/catchments", (req, res) => {
 
+  const flooded =
+    gauges.filter(
+      g =>
+        g.status === "Major" ||
+        g.status === "Moderate"
+    );
+
+  const catchments = {};
+
+  for (const gauge of flooded) {
+
+    const catchment =
+      gauge.stream ||
+      gauge.basin ||
+      "Unknown";
+
+    if (!catchments[catchment]) {
+      catchments[catchment] = [];
+    }
+
+    catchments[catchment].push({
+      id: gauge.id,
+      name: gauge.name,
+      stream: gauge.stream,
+      basin: gauge.basin,
+      level: gauge.level,
+      status: gauge.status,
+      timestamp: gauge.timestamp,
+      thresholds: gauge.thresholds,
+      lat: gauge.lat,
+      lon: gauge.lon
+    });
+  }
+
+  res.json(
+    Object.entries(catchments)
+      .map(([catchment, stations]) => ({
+        catchment,
+        stations
+      }))
+      .sort(
+        (a, b) =>
+          b.stations.length -
+          a.stations.length
+      )
+  );
+
+});
+
+app.get("/api/catchment-summary", (req, res) => {
+
+  const flooded =
+    gauges.filter(
+      g =>
+        g.status === "Major" ||
+        g.status === "Moderate"
+    );
+
+  const summary = {};
+
+  for (const gauge of flooded) {
+
+    const catchment =
+      gauge.stream ||
+      gauge.basin ||
+      "Unknown";
+
+    if (!summary[catchment]) {
+
+      summary[catchment] = {
+        catchment,
+        stations: 0,
+        major: 0,
+        moderate: 0
+      };
+
+    }
+
+    summary[catchment].stations++;
+
+    if (gauge.status === "Major") {
+      summary[catchment].major++;
+    }
+
+    if (gauge.status === "Moderate") {
+      summary[catchment].moderate++;
+    }
+
+  }
+
+  res.json(
+    Object.values(summary)
+      .sort(
+        (a, b) =>
+          b.stations -
+          a.stations
+      )
+  );
+
+});
 app.listen(PORT, () => {
 
   console.log(
