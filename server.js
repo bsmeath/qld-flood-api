@@ -19,38 +19,163 @@ const http = axios.create({
   }
 });
 
-app.get("/api/debug", async (req, res) => {
+const STATION_INDEX =
+  "https://www.bom.gov.au/qld/flood/networks/section3.shtml";
 
-  try {
+let gaugeCache = [];
+let lastRefresh = null;
 
-    const url =
-      "https://www.bom.gov.au/qld/flood/networks/section3.shtml";
+function convertLatLon(latRaw, lonRaw) {
 
-    const response =
-      await http.get(url);
+  const latDeg =
+    parseInt(latRaw.slice(0, 2));
 
-    const html =
-      response.data;
+  const latMin =
+    parseInt(latRaw.slice(2, 4));
 
-    res.json({
-      length: html.length,
-      first5000:
-        html.substring(0, 5000)
-    });
+  const latSec =
+    parseInt(latRaw.slice(4, 6));
 
-  } catch (err) {
+  const lat =
+    -(
+      latDeg +
+      latMin / 60 +
+      latSec / 3600
+    );
 
-    res.status(500).json({
-      status:
-        err.response?.status,
-      message:
-        err.message
+  const lonDeg =
+    parseInt(lonRaw.slice(0, 3));
+
+  const lonMin =
+    parseInt(lonRaw.slice(3, 5));
+
+  const lonSec =
+    parseInt(lonRaw.slice(5, 7));
+
+  const lon =
+    lonDeg +
+    lonMin / 60 +
+    lonSec / 3600;
+
+  return {
+    lat,
+    lon
+  };
+}
+
+async function loadStations() {
+
+  const response =
+    await http.get(STATION_INDEX);
+
+  const text =
+    cheerio.load(response.data)(
+      "pre"
+    ).text();
+
+  const stations = [];
+
+  const lines =
+    text.split("\n");
+
+  for (const line of lines) {
+
+    const match =
+      line.match(
+        /^\s*(\d{6})\s+(\d+)?\s+([A-Z0-9\s\-\(\)]+?)\s{2,}([A-Z0-9\s\-\(\)]+?)\s{2,}([A-Z\-\s]+?)\s+(\d{6,7}S)\s+(\d{7}E)/i
+      );
+
+    if (!match) continue;
+
+    const coords =
+      convertLatLon(
+        match[6],
+        match[7]
+      );
+
+    stations.push({
+      id: match[1],
+      awrc:
+        match[2] || "",
+      name:
+        match[3].trim(),
+      stream:
+        match[4].trim(),
+      basin:
+        match[5].trim(),
+      lat: coords.lat,
+      lon: coords.lon,
+      level: null,
+      status: "Unknown"
     });
 
   }
 
+  return stations;
+}
+
+async function refreshStations() {
+
+  try {
+
+    console.log(
+      "Loading station catalogue..."
+    );
+
+    gaugeCache =
+      await loadStations();
+
+    lastRefresh =
+      new Date().toISOString();
+
+    console.log(
+      `Loaded ${gaugeCache.length} stations`
+    );
+
+  } catch (err) {
+
+    console.error(
+      err.message
+    );
+
+  }
+
+}
+
+app.get("/api/status", (req, res) => {
+
+  res.json({
+    status: "online",
+    gauges:
+      gaugeCache.length,
+    updated:
+      lastRefresh
+  });
+
 });
 
-app.listen(PORT, () => {
-  console.log(`Listening on ${PORT}`);
+app.get("/api/gauges", (req, res) => {
+
+  res.json(
+    gaugeCache
+  );
+
 });
+
+app.listen(
+  PORT,
+  async () => {
+
+    console.log(
+      `Running on ${PORT}`
+    );
+
+    await refreshStations();
+
+    setInterval(
+      refreshStations,
+      5 * 60 * 1000
+    );
+
+  }
+);
