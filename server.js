@@ -9,7 +9,7 @@ app.use(cors());
 
 const PORT = process.env.PORT || 3001;
 
-const TEST_URL =
+const URL =
   "https://www.bom.gov.au/fwo/IDQ65388/IDQ65388.540230.plt.shtml";
 
 const http = axios.create({
@@ -20,45 +20,20 @@ const http = axios.create({
   }
 });
 
-app.get("/api/live-test", async (req, res) => {
+app.get("/api/debug", async (req, res) => {
 
   try {
 
     const response =
-      await http.get(TEST_URL);
+      await http.get(URL);
 
-    const $ =
-      cheerio.load(response.data);
-
-    const title =
-      $("title").text();
-
-    const rows = [];
-
-    $("tr").each((_, tr) => {
-
-      const cols = [];
-
-      $(tr).find("td").each((__, td) => {
-
-        cols.push(
-          $(td).text().trim()
-        );
-
-      });
-
-      if (cols.length) {
-        rows.push(cols);
-      }
-
-    });
+    const html =
+      response.data;
 
     res.json({
-      title,
-      tablesFound:
-        rows.length,
-      sample:
-        rows.slice(0, 30)
+      length: html.length,
+      first10000:
+        html.substring(0, 10000)
     });
 
   } catch (err) {
