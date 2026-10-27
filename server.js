@@ -1,6 +1,7 @@
 import express from "express";
 import cors from "cors";
 import axios from "axios";
+import * as cheerio from "cheerio";
 
 const app = express();
 
@@ -8,65 +9,501 @@ app.use(cors());
 
 const PORT = process.env.PORT || 3001;
 
-const TEST_URL =
-  "https://www.bom.gov.au/fwo/IDQ65388/IDQ65388.540230.tbl.shtml";
-
-app.get("/api/debug", async (req, res) => {
-  try {
-
-    const response =
-      await axios.get(TEST_URL, {
-        timeout: 30000,
-        headers: {
-          "User-Agent":
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131 Safari/537.36"
-        }
-      });
-
-    const html = response.data;
-
-    const interesting = [];
-
-    const lines = html.split("\n");
-
-    for (const line of lines) {
-
-      const lower =
-        line.toLowerCase();
-
-      if (
-        lower.includes("data") ||
-        lower.includes("series") ||
-        lower.includes("plot") ||
-        lower.includes("height") ||
-        lower.includes("river") ||
-        lower.includes("csv") ||
-        lower.includes("javascript") ||
-        lower.includes("array") ||
-        lower.includes("threshold") ||
-        lower.includes("major") ||
-        lower.includes("moderate") ||
-        lower.includes("minor")
-      ) {
-        interesting.push(line.trim());
-      }
-    }
-
-    res.json({
-      matches: interesting.length,
-      lines: interesting.slice(0, 200)
-    });
-
-  } catch (err) {
-
-    res.status(500).json({
-      status: err.response?.status,
-      message: err.message
-    });
-
+const http = axios.create({
+  timeout: 30000,
+  headers: {
+    "User-Agent":
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131 Safari/537.36"
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`Listening on ${PORT}`);
-});
+const FLOOD_PAGES = [
+  "https://www.bom.gov.au/qld/flood/brisbane.shtml",
+  "https://www.bom.gov.au/qld/flood/mary.shtml",
+  "https://www.bom.gov.au/qld/flood/widebay.shtml",
+  "https://www.bom.gov.au/qld/flood/seast.shtml",
+  "https://www.bom.gov.au/qld/flood/albert.shtml",
+  "https://www.bom.gov.au/qld/flood/central.shtml",
+  "https://www.bom.gov.au/qld/flood/townsville.shtml",
+  "https://www.bom.gov.au/qld/flood/gulf.shtml",
+  "https://www.bom.gov.au/qld/flood/west.shtml",
+  "https://www.bom.gov.au/qld/flood/border.shtml",
+  "https://www.bom.gov.au/qld/flood/macintyre.shtml",
+  "https://www.bom.gov.au/qld/flood/north.shtml"
+];
+
+const STATION_INDEX =
+  "https://www.bom.gov.au/qld/flood/networks/section3.shtml";
+
+let gauges = [];
+let updated = null;
+
+function classify(level, thresholds) {
+
+  if (level == null || !thresholds) {
+    return "Unknown";
+  }
+
+  if (
+    thresholds.major != null &&
+    level >= thresholds.major
+  ) {
+    return "Major";
+  }
+
+  if (
+    thresholds.moderate != null &&
+    level >= thresholds.moderate
+  ) {
+    return "Moderate";
+  }
+
+  if (
+    thresholds.minor != null &&
+    level >= thresholds.minor
+  ) {
+    return "Minor";
+  }
+
+  return "Normal";
+}
+
+function dmsToDecimal(latRaw, lonRaw) {
+
+  const lat =
+    -(
+      parseInt(latRaw.slice(0, 2)) +
+      parseInt(latRaw.slice(2, 4)) / 60 +
+      parseInt(latRaw.slice(4, 6)) / 3600
+    );
+
+  const lon =
+    parseInt(lonRaw.slice(0, 3)) +
+    parseInt(lonRaw.slice(3, 5)) / 60 +
+    parseInt(lonRaw.slice(5, 7)) / 3600;
+
+  return { lat, lon };
+}
+
+async function loadCatalogue() {
+
+  const response =
+    await http.get(STATION_INDEX);
+
+  const $ =
+    cheerio.load(response.data);
+
+  const text =
+    $("pre").text();
+
+  const lines =
+    text.split("\n");
+
+  const stations = [];
+
+  for (const line of lines) {
+
+    const match = line.match(
+      /^\s*(\d{6})\s+(\d+)?\s+(.+?)\s{2,}(.+?)\s{2,}(.+?)\s+(\d{6,7}S)\s+(\d{7}E)\s*$/
+    );
+
+    if (!match) continue;
+
+    try {
+
+      const coords =
+        dmsToDecimal(
+          match[6],
+          match[7]
+        );
+
+      stations.push({
+        id: match[1],
+        name: match[3].trim(),
+        stream: match[4].trim(),
+        basin: match[5].trim(),
+        lat: coords.lat,
+        lon: coords.lon
+      });
+
+    } catch {}
+  }
+
+  return stations;
+}
+
+async function buildFwoLookup() {
+
+  const lookup = {};
+
+  for (const page of FLOOD_PAGES) {
+
+    try {
+
+      const response =
+        await http.get(page);
+
+      const $ =
+        cheerio.load(response.data);
+
+      $("area").each((_, area) => {
+
+        const href =
+          $(area).attr("href");
+
+        if (!href) return;
+
+        const match =
+          href.match(
+            /\/fwo\/(IDQ\d+)\/\1\.(\d{6})\.plt\.shtml/
+          );
+
+        if (!match) return;
+
+        lookup[match[2]] = {
+          idq: match[1],
+
+          plt:
+            `https://www.bom.gov.au${href}`,
+
+          tbl:
+            `https://www.bom.gov.au${href.replace(
+              ".plt.shtml",
+              ".tbl.shtml"
+            )}`
+        };
+
+      });
+
+    } catch (err) {
+
+      console.log(
+        "Failed:",
+        page
+      );
+    }
+  }
+
+  return lookup;
+}
+
+async function getLatestLevel(tblUrl) {
+
+  try {
+
+    const response =
+      await http.get(tblUrl);
+
+    const $ =
+      cheerio.load(response.data);
+
+    const rows = [];
+
+    $("tr").each((_, tr) => {
+
+      const cols = [];
+
+      $(tr)
+        .find("td")
+        .each((__, td) => {
+          cols.push(
+            $(td).text().trim()
+          );
+        });
+
+      if (cols.length >= 2) {
+        rows.push(cols);
+      }
+
+    });
+
+    if (!rows.length) {
+      return null;
+    }
+
+    const latest =
+      rows[rows.length - 1];
+
+    return {
+      timestamp: latest[0],
+      level:
+        parseFloat(latest[1])
+    };
+
+  } catch {
+
+    return null;
+  }
+}
+
+async function getThresholds(fwo) {
+
+  try {
+
+    const response =
+      await http.get(fwo.plt);
+
+    const html =
+      response.data;
+
+    const thresholds = {};
+
+    const minor =
+      html.match(
+        /Minor:\s*<\/strong>\s*([\d.]+)/i
+      );
+
+    const moderate =
+      html.match(
+        /Moderate:\s*<\/strong>\s*([\d.]+)/i
+      );
+
+    const major =
+      html.match(
+        /Major:\s*<\/strong>\s*([\d.]+)/i
+      );
+
+    if (minor) {
+      thresholds.minor =
+        parseFloat(
+          minor[1]
+        );
+    }
+
+    if (moderate) {
+      thresholds.moderate =
+        parseFloat(
+          moderate[1]
+        );
+    }
+
+    if (major) {
+      thresholds.major =
+        parseFloat(
+          major[1]
+        );
+    }
+
+    return Object.keys(
+      thresholds
+    ).length
+      ? thresholds
+      : null;
+
+  } catch {
+
+    return null;
+  }
+}
+
+async function enrichStation(
+  station,
+  fwo
+) {
+
+  try {
+
+    station.fwoId =
+      fwo.idq;
+
+    station.tbl =
+      fwo.tbl;
+
+    station.plt =
+      fwo.plt;
+
+    const live =
+      await getLatestLevel(
+        fwo.tbl
+      );
+
+    if (live) {
+
+      station.level =
+        live.level;
+
+      station.timestamp =
+        live.timestamp;
+    }
+
+    const thresholds =
+      await getThresholds(
+        fwo
+      );
+
+    station.thresholds =
+      thresholds;
+
+    station.status =
+      classify(
+        station.level,
+        thresholds
+      );
+
+  } catch (err) {
+
+    station.status =
+      "Unknown";
+  }
+
+  return station;
+}
+
+async function refresh() {
+
+  console.log(
+    "Loading catalogue..."
+  );
+
+  const stationList =
+    await loadCatalogue();
+
+  console.log(
+    `Stations: ${stationList.length}`
+  );
+
+  const lookup =
+    await buildFwoLookup();
+
+  console.log(
+    `FWO Links: ${Object.keys(lookup).length}`
+  );
+
+  const matchedStations =
+    stationList.filter(
+      s => lookup[s.id]
+    );
+
+  console.log(
+    `Matched: ${matchedStations.length}`
+  );
+
+  const batchSize = 25;
+
+  for (
+    let i = 0;
+    i < matchedStations.length;
+    i += batchSize
+  ) {
+
+    const batch =
+      matchedStations.slice(
+        i,
+        i + batchSize
+      );
+
+    await Promise.all(
+      batch.map(station =>
+        enrichStation(
+          station,
+          lookup[station.id]
+        )
+      )
+    );
+
+    console.log(
+      `${Math.min(
+        i + batchSize,
+        matchedStations.length
+      )}/${matchedStations.length}`
+    );
+  }
+
+  gauges = stationList;
+
+  updated =
+    new Date().toISOString();
+
+  const flooded =
+    gauges.filter(
+      g =>
+        g.status ===
+          "Moderate" ||
+        g.status === "Major"
+    );
+
+  console.log(
+    `Flooded stations: ${flooded.length}`
+  );
+}
+
+app.get(
+  "/api/status",
+  (req, res) => {
+
+    res.json({
+      status: "online",
+      gauges:
+        gauges.length,
+      updated
+    });
+  }
+);
+
+app.get(
+  "/api/gauges",
+  (req, res) => {
+    res.json(gauges);
+  }
+);
+
+app.get(
+  "/api/flooded",
+  (req, res) => {
+
+    res.json(
+      gauges.filter(
+        g =>
+          g.status ===
+            "Moderate" ||
+          g.status ===
+            "Major"
+      )
+    );
+  }
+);
+
+app.get(
+  "/api/major",
+  (req, res) => {
+
+    res.json(
+      gauges.filter(
+        g =>
+          g.status ===
+          "Major"
+      )
+    );
+  }
+);
+
+app.get(
+  "/api/moderate",
+  (req, res) => {
+
+    res.json(
+      gauges.filter(
+        g =>
+          g.status ===
+          "Moderate"
+      )
+    );
+  }
+);
+
+app.listen(
+  PORT,
+  async () => {
+
+    console.log(
+      `Listening on ${PORT}`
+    );
+
+    await refresh();
+
+    setInterval(
+      refresh,
+      15 * 60 * 1000
+    );
+  }
+);
