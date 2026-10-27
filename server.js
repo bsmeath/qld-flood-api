@@ -9,6 +9,9 @@ app.use(cors());
 
 const PORT = process.env.PORT || 3001;
 
+const TEST_URL =
+  "https://www.bom.gov.au/fwo/IDQ65388/IDQ65388.540230.plt.shtml";
+
 const http = axios.create({
   timeout: 30000,
   headers: {
@@ -17,33 +20,45 @@ const http = axios.create({
   }
 });
 
-app.get("/api/debug", async (req, res) => {
+app.get("/api/live-test", async (req, res) => {
 
   try {
 
     const response =
-      await http.get(
-        "https://www.bom.gov.au/qld/flood/brisbane.shtml"
-      );
+      await http.get(TEST_URL);
 
     const $ =
       cheerio.load(response.data);
 
-    const maps = [];
+    const title =
+      $("title").text();
 
-    $("area").each((_, area) => {
+    const rows = [];
 
-      maps.push({
-        alt: $(area).attr("alt"),
-        title: $(area).attr("title"),
-        href: $(area).attr("href")
+    $("tr").each((_, tr) => {
+
+      const cols = [];
+
+      $(tr).find("td").each((__, td) => {
+
+        cols.push(
+          $(td).text().trim()
+        );
+
       });
+
+      if (cols.length) {
+        rows.push(cols);
+      }
 
     });
 
     res.json({
-      count: maps.length,
-      sample: maps.slice(0, 100)
+      title,
+      tablesFound:
+        rows.length,
+      sample:
+        rows.slice(0, 30)
     });
 
   } catch (err) {
@@ -60,5 +75,7 @@ app.get("/api/debug", async (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`Listening on ${PORT}`);
+  console.log(
+    `Listening on ${PORT}`
+  );
 });
