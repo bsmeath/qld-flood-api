@@ -40,58 +40,36 @@ let updated = null;
 
 function classify(level, thresholds) {
 
-  if (
-    level == null ||
-    !thresholds
-  ) {
+  if (level == null) {
     return "Unknown";
   }
 
+  if (!thresholds) {
+    return "No Thresholds";
+  }
+
   if (
-    thresholds.major != null &&
+    thresholds.major !== undefined &&
     level >= thresholds.major
   ) {
     return "Major";
   }
 
   if (
-    thresholds.moderate != null &&
+    thresholds.moderate !== undefined &&
     level >= thresholds.moderate
   ) {
     return "Moderate";
   }
 
   if (
-    thresholds.minor != null &&
+    thresholds.minor !== undefined &&
     level >= thresholds.minor
   ) {
     return "Minor";
   }
 
   return "Normal";
-}
-
-function dmsToDecimal(
-  latRaw,
-  lonRaw
-) {
-
-  const lat =
-    -(
-      parseInt(latRaw.slice(0, 2)) +
-      parseInt(latRaw.slice(2, 4)) / 60 +
-      parseInt(latRaw.slice(4, 6)) / 3600
-    );
-
-  const lon =
-    parseInt(lonRaw.slice(0, 3)) +
-    parseInt(lonRaw.slice(3, 5)) / 60 +
-    parseInt(lonRaw.slice(5, 7)) / 3600;
-
-  return {
-    lat,
-    lon
-  };
 }
 
 function determineTrend(
@@ -120,6 +98,27 @@ function determineTrend(
   return "steady";
 }
 
+function dmsToDecimal(
+  latRaw,
+  lonRaw
+) {
+
+  const lat =
+    -(
+      parseInt(latRaw.slice(0, 2)) +
+      parseInt(latRaw.slice(2, 4)) / 60 +
+      parseInt(latRaw.slice(4, 6)) / 3600
+    );
+
+  const lon =
+    parseInt(lonRaw.slice(0, 3)) +
+    parseInt(lonRaw.slice(3, 5)) / 60 +
+    parseInt(lonRaw.slice(5, 7)) / 3600;
+
+  return { lat, lon };
+
+}
+
 async function loadCatalogue() {
 
   const response =
@@ -133,54 +132,41 @@ async function loadCatalogue() {
 
   const stations = [];
 
-  text.split("\n")
-    .forEach(line => {
+  text.split("\n").forEach(line => {
 
-      const match =
-        line.match(
-          /^\s*(\d{6})\s+(\d+)?\s+(.+?)\s{2,}(.+?)\s{2,}(.+?)\s+(\d{6,7}S)\s+(\d{7}E)\s*$/
-        );
+    const match =
+      line.match(
+        /^\s*(\d{6})\s+(\d+)?\s+(.+?)\s{2,}(.+?)\s{2,}(.+?)\s+(\d{6,7}S)\s+(\d{7}E)\s*$/
+      );
 
-      if (!match) {
-        return;
-      }
+    if (!match) {
+      return;
+    }
 
-      const coords =
-        dmsToDecimal(
-          match[6],
-          match[7]
-        );
+    const coords =
+      dmsToDecimal(
+        match[6],
+        match[7]
+      );
 
-      stations.push({
-
-        id: match[1],
-
-        name:
-          match[3].trim(),
-
-        stream:
-          match[4].trim(),
-
-        basin:
-          match[5].trim(),
-
-        lat: coords.lat,
-        lon: coords.lon,
-
-        level: null,
-        previousLevel: null,
-        change: null,
-        trend: "unknown",
-        rapidRise: false,
-
-        timestamp: null,
-
-        thresholds: null,
-
-        status: "Unknown"
-      });
-
+    stations.push({
+      id: match[1],
+      name: match[3].trim(),
+      stream: match[4].trim(),
+      basin: match[5].trim(),
+      lat: coords.lat,
+      lon: coords.lon,
+      level: null,
+      previousLevel: null,
+      change: null,
+      trend: "unknown",
+      rapidRise: false,
+      timestamp: null,
+      thresholds: null,
+      status: "Unknown"
     });
+
+  });
 
   return stations;
 }
@@ -233,7 +219,7 @@ async function buildFwoLookup() {
     } catch (err) {
 
       console.log(
-        "Failed:",
+        "FWO page failed:",
         page
       );
 
@@ -263,9 +249,11 @@ async function getLatestLevel(tblUrl) {
       $(tr)
         .find("td")
         .each((__, td) => {
+
           cols.push(
             $(td).text().trim()
           );
+
         });
 
       if (cols.length >= 2) {
@@ -333,7 +321,8 @@ async function getThresholds(fwo) {
     const text =
       cheerio
         .load(response.data)
-        .text();
+        .text()
+        .replace(/\s+/g, " ");
 
     const thresholds = {};
 
@@ -376,7 +365,6 @@ async function getThresholds(fwo) {
     return null;
 
   }
-
 }
 
 async function enrichStation(
@@ -398,23 +386,10 @@ async function enrichStation(
 
     if (live) {
 
-      station.level =
-        live.level;
-
-      station.previousLevel =
-        live.previousLevel;
-
-      station.change =
-        live.change;
-
-      station.trend =
-        live.trend;
-
-      station.rapidRise =
-        live.rapidRise;
-
-      station.timestamp =
-        live.timestamp;
+      Object.assign(
+        station,
+        live
+      );
 
     }
 
@@ -443,81 +418,82 @@ async function enrichStation(
 
 async function refresh() {
 
-  console.log(
-    "Loading catalogue..."
-  );
-
-  const stationList =
-    await loadCatalogue();
-
-  const lookup =
-    await buildFwoLookup();
-
-  gauges = stationList;
-
-  updated =
-    new Date().toISOString();
-
-  const matchedStations =
-    stationList.filter(
-      s => lookup[s.id]
-    );
-
-  console.log(
-    `Matched: ${matchedStations.length}`
-  );
-
-  const batchSize = 50;
-
-  for (
-    let i = 0;
-    i < matchedStations.length;
-    i += batchSize
-  ) {
-
-    const batch =
-      matchedStations.slice(
-        i,
-        i + batchSize
-      );
-
-    await Promise.all(
-      batch.map(
-        station =>
-          enrichStation(
-            station,
-            lookup[station.id]
-          )
-      )
-    );
+  try {
 
     console.log(
-      `${Math.min(
-        i + batchSize,
-        matchedStations.length
-      )}/${matchedStations.length}`
+      "Loading catalogue..."
     );
+
+    const stationList =
+      await loadCatalogue();
+
+    const lookup =
+      await buildFwoLookup();
+
+    const matchedStations =
+      stationList.filter(
+        s => lookup[s.id]
+      );
+
+    console.log(
+      `Matched: ${matchedStations.length}`
+    );
+
+    const batchSize = 50;
+
+    for (
+      let i = 0;
+      i < matchedStations.length;
+      i += batchSize
+    ) {
+
+      const batch =
+        matchedStations.slice(
+          i,
+          i + batchSize
+        );
+
+      await Promise.all(
+        batch.map(
+          station =>
+            enrichStation(
+              station,
+              lookup[station.id]
+            )
+        )
+      );
+
+    }
+
+    gauges =
+      stationList;
+
+    updated =
+      new Date().toISOString();
+
+    console.log(
+      "Refresh complete"
+    );
+
+  } catch (err) {
+
+    console.error(
+      "Refresh failed",
+      err
+    );
+
   }
 
-  gauges = stationList;
-
-  updated =
-    new Date().toISOString();
-
-  console.log(
-    "Refresh complete"
-  );
 }
 
-app.get("/api/status", (req, res) => {
+/* ENDPOINTS */
 
+app.get("/api/status", (req, res) => {
   res.json({
     status: "online",
-    gauges:
-      gauges.length,
+    gauges: gauges.length,
     updated
   });
-
 });
 
 app.get("/api/gauges", (req, res) => {
@@ -525,7 +501,6 @@ app.get("/api/gauges", (req, res) => {
 });
 
 app.get("/api/flooded", (req, res) => {
-
   res.json(
     gauges.filter(
       g =>
@@ -533,7 +508,6 @@ app.get("/api/flooded", (req, res) => {
         g.status === "Moderate"
     )
   );
-
 });
 
 app.get("/api/major", (req, res) => {
@@ -558,39 +532,78 @@ app.get("/api/moderate", (req, res) => {
 
 });
 
-app.get("/api/catchments", (req, res) => {
+app.get("/api/stats", (req, res) => {
 
-  const flooded =
-    gauges.filter(
-      g =>
-        g.status === "Major" ||
-        g.status === "Moderate"
-    );
+  res.json({
+
+    total:
+      gauges.length,
+
+    withLevels:
+      gauges.filter(
+        g => g.level != null
+      ).length,
+
+    withThresholds:
+      gauges.filter(
+        g => g.thresholds
+      ).length,
+
+    major:
+      gauges.filter(
+        g =>
+          g.status === "Major"
+      ).length,
+
+    moderate:
+      gauges.filter(
+        g =>
+          g.status === "Moderate"
+      ).length,
+
+    unknown:
+      gauges.filter(
+        g =>
+          g.status === "Unknown"
+      ).length
+
+  });
+
+});
+
+app.get("/api/catchments", (req, res) => {
 
   const groups = {};
 
-  for (const gauge of flooded) {
+  gauges
+    .filter(
+      g =>
+        g.status === "Major" ||
+        g.status === "Moderate"
+    )
+    .forEach(gauge => {
 
-    const catchment =
-      gauge.stream ||
-      gauge.basin ||
-      "Unknown";
+      const key =
+        gauge.stream ||
+        gauge.basin ||
+        "Unknown";
 
-    if (!groups[catchment]) {
-      groups[catchment] = [];
-    }
+      if (!groups[key]) {
+        groups[key] = [];
+      }
 
-    groups[catchment].push(gauge);
+      groups[key].push(gauge);
 
-  }
+    });
 
   res.json(
-    Object.entries(groups).map(
-      ([catchment, stations]) => ({
-        catchment,
-        stations
-      })
-    )
+    Object.entries(groups)
+      .map(
+        ([catchment, stations]) => ({
+          catchment,
+          stations
+        })
+      )
   );
 
 });
@@ -599,48 +612,47 @@ app.get(
   "/api/catchment-summary",
   (req, res) => {
 
-    const flooded =
-      gauges.filter(
+    const summary = {};
+
+    gauges
+      .filter(
         g =>
           g.status === "Major" ||
           g.status === "Moderate"
-      );
+      )
+      .forEach(g => {
 
-    const summary = {};
+        const key =
+          g.stream ||
+          g.basin ||
+          "Unknown";
 
-    for (const gauge of flooded) {
+        if (!summary[key]) {
 
-      const catchment =
-        gauge.stream ||
-        gauge.basin ||
-        "Unknown";
+          summary[key] = {
+            catchment: key,
+            stations: 0,
+            major: 0,
+            moderate: 0
+          };
 
-      if (!summary[catchment]) {
+        }
 
-        summary[catchment] = {
-          catchment,
-          stations: 0,
-          major: 0,
-          moderate: 0
-        };
+        summary[key].stations++;
 
-      }
+        if (
+          g.status === "Major"
+        ) {
+          summary[key].major++;
+        }
 
-      summary[catchment].stations++;
+        if (
+          g.status === "Moderate"
+        ) {
+          summary[key].moderate++;
+        }
 
-      if (
-        gauge.status === "Major"
-      ) {
-        summary[catchment].major++;
-      }
-
-      if (
-        gauge.status === "Moderate"
-      ) {
-        summary[catchment].moderate++;
-      }
-
-    }
+      });
 
     res.json(
       Object.values(summary)
