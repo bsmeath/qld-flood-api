@@ -9,9 +9,6 @@ app.use(cors());
 
 const PORT = process.env.PORT || 3001;
 
-const ROOT =
-  "https://www.bom.gov.au/qld/flood/rain_river.shtml";
-
 const HEADERS = {
   "User-Agent":
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131 Safari/537.36",
@@ -35,82 +32,6 @@ app.get("/api/status", (req, res) => {
   });
 });
 
-app.get("/api/test-gauge", async (req, res) => {
-  try {
-
-    const response = await http.get(ROOT);
-
-    res.json({
-      success: true,
-      status: response.status,
-      bytes: response.data.length
-    });
-
-  } catch (err) {
-
-    res.status(500).json({
-      success: false,
-      status: err.response?.status,
-      message: err.message
-    });
-
-  }
-});
-
-app.get("/api/discovery", async (req, res) => {
-
-  try {
-
-    const rootPage =
-      await http.get(ROOT);
-
-    const $ =
-      cheerio.load(rootPage.data);
-
-    const catchmentPages =
-      [];
-
-    $("a").each((_, a) => {
-
-      const href =
-        $(a).attr("href");
-
-      if (!href) return;
-
-      if (
-        href.includes("/qld/flood/") &&
-        href.endsWith(".shtml")
-      ) {
-
-        catchmentPages.push(
-          new URL(
-            href,
-            ROOT
-          ).href
-        );
-      }
-    });
-
-    res.json({
-      catchments:
-        catchmentPages.length,
-      sample:
-        catchmentPages.slice(0, 20)
-    });
-
-  } catch (err) {
-
-    res.status(500).json({
-      status:
-        err.response?.status,
-      message:
-        err.message
-    });
-
-  }
-
-});
-
 app.get("/api/debug", async (req, res) => {
 
   try {
@@ -124,29 +45,25 @@ app.get("/api/debug", async (req, res) => {
     const $ =
       cheerio.load(response.data);
 
-    const links =
-      [];
+    const bodyText =
+      $("body").text();
 
-    $("a").each((_, link) => {
-
-      links.push({
-        text:
-          $(link)
-            .text()
-            .trim(),
-        href:
-          $(link)
-            .attr("href")
-      });
-
-    });
+    const gaugeMatches =
+      bodyText.match(
+        /\d{6}/g
+      ) || [];
 
     res.json({
       page,
-      count:
-        links.length,
-      sample:
-        links.slice(0, 100)
+      pageLength:
+        bodyText.length,
+      sixDigitNumbers:
+        [...new Set(gaugeMatches)]
+          .slice(0, 100),
+      title:
+        $("title")
+          .text()
+          .trim()
     });
 
   } catch (err) {
@@ -163,9 +80,7 @@ app.get("/api/debug", async (req, res) => {
 });
 
 app.listen(PORT, () => {
-
   console.log(
     `QLD Flood API listening on ${PORT}`
   );
-
 });
