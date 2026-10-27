@@ -74,4 +74,73 @@ app.get("/api/discovery", async (req, res) => {
     try {
 
       const r =
-        await http.
+        await http.get(page);
+
+      const $page =
+        cheerio.load(r.data);
+
+      $page("a").each(
+        (_, link) => {
+
+          const href =
+            $page(link)
+              .attr("href") || "";
+
+          const text =
+            $page(link)
+              .text()
+              .trim();
+
+          const match =
+            href.match(
+              /\.([0-9]{6})\.plt\.shtml/i
+            );
+
+          if (!match) return;
+
+          const id =
+            match[1];
+
+          stationMap.set(id, {
+            id,
+            name:
+              text || id,
+            url:
+              new URL(
+                href,
+                page
+              ).href,
+            source:
+              page
+          });
+
+        }
+      );
+
+    } catch (err) {
+
+      console.log(
+        page,
+        err.message
+      );
+
+    }
+  }
+
+  res.json({
+    catchments:
+      catchmentPages.length,
+    stations:
+      stationMap.size,
+    sample:
+      [...stationMap.values()]
+        .slice(0, 20)
+  });
+
+});
+
+app.listen(PORT, () => {
+  console.log(
+    `Running on ${PORT}`
+  );
+});
