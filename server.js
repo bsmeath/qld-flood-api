@@ -39,7 +39,6 @@ let gauges = [];
 let updated = null;
 
 function classify(level, thresholds) {
-
   if (level == null || !thresholds) {
     return "Unknown";
   }
@@ -69,7 +68,6 @@ function classify(level, thresholds) {
 }
 
 function dmsToDecimal(latRaw, lonRaw) {
-
   const lat =
     -(
       parseInt(latRaw.slice(0, 2)) +
@@ -86,7 +84,6 @@ function dmsToDecimal(latRaw, lonRaw) {
 }
 
 async function loadCatalogue() {
-
   const response =
     await http.get(STATION_INDEX);
 
@@ -102,7 +99,6 @@ async function loadCatalogue() {
   const stations = [];
 
   for (const line of lines) {
-
     const match = line.match(
       /^\s*(\d{6})\s+(\d+)?\s+(.+?)\s{2,}(.+?)\s{2,}(.+?)\s+(\d{6,7}S)\s+(\d{7}E)\s*$/
     );
@@ -110,7 +106,6 @@ async function loadCatalogue() {
     if (!match) continue;
 
     try {
-
       const coords =
         dmsToDecimal(
           match[6],
@@ -129,7 +124,6 @@ async function loadCatalogue() {
         thresholds: null,
         status: "Unknown"
       });
-
     } catch {}
   }
 
@@ -137,13 +131,10 @@ async function loadCatalogue() {
 }
 
 async function buildFwoLookup() {
-
   const lookup = {};
 
   for (const page of FLOOD_PAGES) {
-
     try {
-
       const response =
         await http.get(page);
 
@@ -151,7 +142,6 @@ async function buildFwoLookup() {
         cheerio.load(response.data);
 
       $("area").each((_, area) => {
-
         const href =
           $(area).attr("href");
 
@@ -165,29 +155,22 @@ async function buildFwoLookup() {
         if (!match) return;
 
         lookup[match[2]] = {
-
           idq: match[1],
-
           plt:
             `https://www.bom.gov.au${href}`,
-
           tbl:
             `https://www.bom.gov.au${href.replace(
               ".plt.shtml",
               ".tbl.shtml"
             )}`
-
         };
-
       });
 
     } catch (err) {
-
       console.log(
         "Failed page:",
         page
       );
-
     }
   }
 
@@ -195,9 +178,7 @@ async function buildFwoLookup() {
 }
 
 async function getLatestLevel(tblUrl) {
-
   try {
-
     const response =
       await http.get(tblUrl);
 
@@ -207,7 +188,6 @@ async function getLatestLevel(tblUrl) {
     const rows = [];
 
     $("tr").each((_, tr) => {
-
       const cols = [];
 
       $(tr)
@@ -221,7 +201,6 @@ async function getLatestLevel(tblUrl) {
       if (cols.length >= 2) {
         rows.push(cols);
       }
-
     });
 
     if (!rows.length) {
@@ -238,17 +217,12 @@ async function getLatestLevel(tblUrl) {
     };
 
   } catch {
-
     return null;
-
   }
-
 }
 
 async function getThresholds(fwo) {
-
   try {
-
     const response =
       await http.get(fwo.plt);
 
@@ -294,20 +268,15 @@ async function getThresholds(fwo) {
       : null;
 
   } catch {
-
     return null;
-
   }
-
 }
 
 async function enrichStation(
   station,
   fwo
 ) {
-
   try {
-
     station.fwoId =
       fwo.idq;
 
@@ -323,7 +292,6 @@ async function enrichStation(
       );
 
     if (live) {
-
       station.level =
         live.level;
 
@@ -346,17 +314,14 @@ async function enrichStation(
       );
 
   } catch {
-
     station.status =
       "Unknown";
-
   }
 
   return station;
 }
 
 async function refresh() {
-
   try {
 
     console.log(
@@ -377,8 +342,6 @@ async function refresh() {
       `FWO Links: ${Object.keys(lookup).length}`
     );
 
-    // publish immediately
-
     gauges =
       stationList;
 
@@ -386,17 +349,15 @@ async function refresh() {
       new Date().toISOString();
 
     const matchedStations =
-      stationList
-        .filter(
-          s => lookup[s.id]
-        )
-        .slice(0, 50);
+      stationList.filter(
+        s => lookup[s.id]
+      );
 
     console.log(
       `Matched: ${matchedStations.length}`
     );
 
-    const batchSize = 10;
+    const batchSize = 50;
 
     for (
       let i = 0;
@@ -411,12 +372,11 @@ async function refresh() {
         );
 
       await Promise.all(
-        batch.map(
-          station =>
-            enrichStation(
-              station,
-              lookup[station.id]
-            )
+        batch.map(station =>
+          enrichStation(
+            station,
+            lookup[station.id]
+          )
         )
       );
 
@@ -460,24 +420,19 @@ async function refresh() {
 }
 
 app.get("/api/status", (req, res) => {
-
   res.json({
     status: "online",
     gauges:
       gauges.length,
     updated
   });
-
 });
 
 app.get("/api/gauges", (req, res) => {
-
   res.json(gauges);
-
 });
 
 app.get("/api/flooded", (req, res) => {
-
   res.json(
     gauges.filter(
       g =>
@@ -485,28 +440,24 @@ app.get("/api/flooded", (req, res) => {
         g.status === "Moderate"
     )
   );
-
 });
 
 app.get("/api/major", (req, res) => {
-
   res.json(
     gauges.filter(
-      g => g.status === "Major"
+      g =>
+        g.status === "Major"
     )
   );
-
 });
 
 app.get("/api/moderate", (req, res) => {
-
   res.json(
     gauges.filter(
       g =>
         g.status === "Moderate"
     )
   );
-
 });
 
 app.listen(PORT, () => {
