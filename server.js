@@ -9,19 +9,12 @@ app.use(cors());
 
 const PORT = process.env.PORT || 3001;
 
-const HEADERS = {
-  "User-Agent":
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131 Safari/537.36",
-  "Accept":
-    "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-  "Accept-Language":
-    "en-AU,en;q=0.9"
-};
-
 const http = axios.create({
   timeout: 30000,
-  headers: HEADERS,
-  maxRedirects: 10
+  headers: {
+    "User-Agent":
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131 Safari/537.36"
+  }
 });
 
 app.get("/api/debug", async (req, res) => {
@@ -29,7 +22,7 @@ app.get("/api/debug", async (req, res) => {
   try {
 
     const url =
-      "https://www.bom.gov.au/qld/flood/networks/index.shtml";
+      "https://www.bom.gov.au/qld/flood/networks/section3.shtml";
 
     const response =
       await http.get(url);
@@ -37,16 +30,21 @@ app.get("/api/debug", async (req, res) => {
     const $ =
       cheerio.load(response.data);
 
-    const links = [];
+    const rows = [];
 
-    $("a").each((_, a) => {
+    $("tr").each((_, row) => {
 
-      links.push({
-        text:
-          $(a).text().trim(),
-        href:
-          $(a).attr("href")
+      const cols = [];
+
+      $(row).find("td").each((__, col) => {
+        cols.push(
+          $(col).text().trim()
+        );
       });
+
+      if (cols.length) {
+        rows.push(cols);
+      }
 
     });
 
@@ -55,19 +53,15 @@ app.get("/api/debug", async (req, res) => {
         $("title")
           .text()
           .trim(),
-      count:
-        links.length,
-      sample:
-        links.slice(0, 200)
+      rows:
+        rows.slice(0, 50)
     });
 
   } catch (err) {
 
     res.status(500).json({
-      status:
-        err.response?.status,
-      message:
-        err.message
+      error: err.message,
+      status: err.response?.status
     });
 
   }
@@ -75,7 +69,5 @@ app.get("/api/debug", async (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(
-    `Listening on ${PORT}`
-  );
+  console.log(`Listening on ${PORT}`);
 });
