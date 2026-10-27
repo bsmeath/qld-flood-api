@@ -1,6 +1,7 @@
 import express from "express";
 import cors from "cors";
 import axios from "axios";
+import * as cheerio from "cheerio";
 
 const app = express();
 
@@ -19,41 +20,61 @@ const HEADERS = {
     "https://www.bom.gov.au/"
 };
 
+const ROOT =
+  "https://www.bom.gov.au/qld/flood/rain_river.shtml";
+
 app.get("/api/status", (req, res) => {
   res.json({
     status: "online"
   });
 });
 
-app.get("/api/test-gauge", async (req, res) => {
+app.get("/api/discovery", async (req, res) => {
   try {
 
-    const url =
-      "https://www.bom.gov.au/qld/flood/";
+    const response =
+      await axios.get(ROOT, {
+        headers: HEADERS,
+        timeout: 30000
+      });
 
-    const response = await axios.get(url, {
-      headers: HEADERS,
-      timeout: 30000,
-      maxRedirects: 10
+    const $ = cheerio.load(response.data);
+
+    const links = [];
+
+    $("a").each((_, link) => {
+
+      const href =
+        $(link).attr("href");
+
+      if (!href) return;
+
+      if (href.endsWith(".shtml")) {
+        links.push(
+          new URL(
+            href,
+            ROOT
+          ).href
+        );
+      }
     });
 
     res.json({
-      success: true,
-      status: response.status,
-      bytes: response.data.length
+      count: links.length,
+      sample: links.slice(0, 20)
     });
 
   } catch (err) {
 
     res.status(500).json({
-      success: false,
-      status: err.response?.status,
-      message: err.message
+      error: err.message,
+      status:
+        err.response?.status
     });
 
   }
 });
 
 app.listen(PORT, () => {
-  console.log(`Listening on ${PORT}`);
+  console.log(`Running on ${PORT}`);
 });
