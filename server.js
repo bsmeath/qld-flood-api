@@ -123,7 +123,11 @@ async function loadCatalogue() {
         stream: match[4].trim(),
         basin: match[5].trim(),
         lat: coords.lat,
-        lon: coords.lon
+        lon: coords.lon,
+        level: null,
+        timestamp: null,
+        thresholds: null,
+        status: "Unknown"
       });
 
     } catch {}
@@ -161,6 +165,7 @@ async function buildFwoLookup() {
         if (!match) return;
 
         lookup[match[2]] = {
+
           idq: match[1],
 
           plt:
@@ -171,6 +176,7 @@ async function buildFwoLookup() {
               ".plt.shtml",
               ".tbl.shtml"
             )}`
+
         };
 
       });
@@ -178,9 +184,10 @@ async function buildFwoLookup() {
     } catch (err) {
 
       console.log(
-        "Failed:",
+        "Failed page:",
         page
       );
+
     }
   }
 
@@ -233,7 +240,9 @@ async function getLatestLevel(tblUrl) {
   } catch {
 
     return null;
+
   }
+
 }
 
 async function getThresholds(fwo) {
@@ -243,57 +252,53 @@ async function getThresholds(fwo) {
     const response =
       await http.get(fwo.plt);
 
-    const html =
-      response.data;
+    const text =
+      cheerio
+        .load(response.data)
+        .text();
 
     const thresholds = {};
 
     const minor =
-      html.match(
-        /Minor:\s*<\/strong>\s*([\d.]+)/i
+      text.match(
+        /Minor:\s*([\d.]+)/i
       );
 
     const moderate =
-      html.match(
-        /Moderate:\s*<\/strong>\s*([\d.]+)/i
+      text.match(
+        /Moderate:\s*([\d.]+)/i
       );
 
     const major =
-      html.match(
-        /Major:\s*<\/strong>\s*([\d.]+)/i
+      text.match(
+        /Major:\s*([\d.]+)/i
       );
 
     if (minor) {
       thresholds.minor =
-        parseFloat(
-          minor[1]
-        );
+        parseFloat(minor[1]);
     }
 
     if (moderate) {
       thresholds.moderate =
-        parseFloat(
-          moderate[1]
-        );
+        parseFloat(moderate[1]);
     }
 
     if (major) {
       thresholds.major =
-        parseFloat(
-          major[1]
-        );
+        parseFloat(major[1]);
     }
 
-    return Object.keys(
-      thresholds
-    ).length
+    return Object.keys(thresholds).length
       ? thresholds
       : null;
 
   } catch {
 
     return null;
+
   }
+
 }
 
 async function enrichStation(
@@ -340,10 +345,11 @@ async function enrichStation(
         thresholds
       );
 
-  } catch (err) {
+  } catch {
 
     station.status =
       "Unknown";
+
   }
 
   return station;
@@ -351,159 +357,169 @@ async function enrichStation(
 
 async function refresh() {
 
-  console.log(
-    "Loading catalogue..."
-  );
+  try {
 
-  const stationList =
-    await loadCatalogue();
-
-  console.log(
-    `Stations: ${stationList.length}`
-  );
-
-  const lookup =
-    await buildFwoLookup();
-
-  console.log(
-    `FWO Links: ${Object.keys(lookup).length}`
-  );
-
-  const matchedStations =
-    stationList.filter(
-      s => lookup[s.id]
+    console.log(
+      "Loading catalogue..."
     );
 
-  console.log(
-    `Matched: ${matchedStations.length}`
-  );
+    const stationList =
+      await loadCatalogue();
 
-  const batchSize = 25;
+    console.log(
+      `Stations: ${stationList.length}`
+    );
 
-  for (
-    let i = 0;
-    i < matchedStations.length;
-    i += batchSize
-  ) {
+    const lookup =
+      await buildFwoLookup();
 
-    const batch =
-      matchedStations.slice(
-        i,
-        i + batchSize
+    console.log(
+      `FWO Links: ${Object.keys(lookup).length}`
+    );
+
+    // publish immediately
+
+    gauges =
+      stationList;
+
+    updated =
+      new Date().toISOString();
+
+    const matchedStations =
+      stationList
+        .filter(
+          s => lookup[s.id]
+        )
+        .slice(0, 50);
+
+    console.log(
+      `Matched: ${matchedStations.length}`
+    );
+
+    const batchSize = 10;
+
+    for (
+      let i = 0;
+      i < matchedStations.length;
+      i += batchSize
+    ) {
+
+      const batch =
+        matchedStations.slice(
+          i,
+          i + batchSize
+        );
+
+      await Promise.all(
+        batch.map(
+          station =>
+            enrichStation(
+              station,
+              lookup[station.id]
+            )
+        )
       );
 
-    await Promise.all(
-      batch.map(station =>
-        enrichStation(
-          station,
-          lookup[station.id]
-        )
-      )
+      console.log(
+        `${Math.min(
+          i + batchSize,
+          matchedStations.length
+        )}/${matchedStations.length}`
+      );
+    }
+
+    gauges =
+      stationList;
+
+    updated =
+      new Date().toISOString();
+
+    const flooded =
+      gauges.filter(
+        g =>
+          g.status === "Major" ||
+          g.status === "Moderate"
+      );
+
+    console.log(
+      `Flooded stations: ${flooded.length}`
     );
 
     console.log(
-      `${Math.min(
-        i + batchSize,
-        matchedStations.length
-      )}/${matchedStations.length}`
+      "Refresh complete"
     );
+
+  } catch (err) {
+
+    console.error(
+      "REFRESH FAILED",
+      err
+    );
+
   }
-
-  gauges = stationList;
-
-  updated =
-    new Date().toISOString();
-
-  const flooded =
-    gauges.filter(
-      g =>
-        g.status ===
-          "Moderate" ||
-        g.status === "Major"
-    );
-
-  console.log(
-    `Flooded stations: ${flooded.length}`
-  );
 }
 
-app.get(
-  "/api/status",
-  (req, res) => {
+app.get("/api/status", (req, res) => {
 
-    res.json({
-      status: "online",
-      gauges:
-        gauges.length,
-      updated
-    });
-  }
-);
+  res.json({
+    status: "online",
+    gauges:
+      gauges.length,
+    updated
+  });
 
-app.get(
-  "/api/gauges",
-  (req, res) => {
-    res.json(gauges);
-  }
-);
+});
 
-app.get(
-  "/api/flooded",
-  (req, res) => {
+app.get("/api/gauges", (req, res) => {
 
-    res.json(
-      gauges.filter(
-        g =>
-          g.status ===
-            "Moderate" ||
-          g.status ===
-            "Major"
-      )
-    );
-  }
-);
+  res.json(gauges);
 
-app.get(
-  "/api/major",
-  (req, res) => {
+});
 
-    res.json(
-      gauges.filter(
-        g =>
-          g.status ===
-          "Major"
-      )
-    );
-  }
-);
+app.get("/api/flooded", (req, res) => {
 
-app.get(
-  "/api/moderate",
-  (req, res) => {
+  res.json(
+    gauges.filter(
+      g =>
+        g.status === "Major" ||
+        g.status === "Moderate"
+    )
+  );
 
-    res.json(
-      gauges.filter(
-        g =>
-          g.status ===
-          "Moderate"
-      )
-    );
-  }
-);
+});
 
-app.listen(
-  PORT,
-  async () => {
+app.get("/api/major", (req, res) => {
 
-    console.log(
-      `Listening on ${PORT}`
-    );
+  res.json(
+    gauges.filter(
+      g => g.status === "Major"
+    )
+  );
 
-    await refresh();
+});
 
-    setInterval(
-      refresh,
-      15 * 60 * 1000
-    );
-  }
-);
+app.get("/api/moderate", (req, res) => {
+
+  res.json(
+    gauges.filter(
+      g =>
+        g.status === "Moderate"
+    )
+  );
+
+});
+
+app.listen(PORT, () => {
+
+  console.log(
+    `Listening on ${PORT}`
+  );
+
+  refresh();
+
+  setInterval(
+    refresh,
+    15 * 60 * 1000
+  );
+
+});
